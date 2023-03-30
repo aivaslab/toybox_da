@@ -1,0 +1,12 @@
+**/data*/
+**/runs*/
+**/out*/
+.idea/
+/*.*
+!.gitignore
+__pycache__
+**/cam*/
+**/configs*/
+**/notebooks*/
+*.pt
+**/old*/
