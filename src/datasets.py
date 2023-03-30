@@ -189,7 +189,7 @@ class ToyboxDataset(torchdata.Dataset):
             imgs = self.transform(img)
         else:
             imgs = img
-        return actual_index, imgs, label
+        return (index, actual_index), imgs, label
     
     def __str__(self):
         return "Toybox"
