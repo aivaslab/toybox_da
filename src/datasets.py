@@ -81,6 +81,7 @@ class DatasetIN12(torchdata.Dataset):
         else:
             item = index
         im = np.array(cv2.imdecode(self.images[item], 3))
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
         label = int(self.labels[item]["Class ID"])
         if self.transform is not None:
             im = self.transform(im)
@@ -101,6 +102,7 @@ class DatasetIN12SSL(DatasetIN12):
     def __getitem__(self, index):
         actual_index = self.selected_indices[index]
         img = np.array(cv2.imdecode(self.images[actual_index], 3))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         if self.transform is not None:
             imgs = [self.transform(img) for _ in range(2)]
         else:
