@@ -38,6 +38,47 @@ class ResNet18Backbone(nn.Module):
         """Return the parameters of the module"""
         return {'backbone_params': self.model.parameters()
                 }
+
+
+class ResNet18Sup(nn.Module):
+    """Definition for Supervised network with ResNet18"""
+    
+    def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, classifier_weights=None):
+        super().__init__()
+        self.backbone = ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
+        self.backbone_fc_size = self.backbone.fc_size
+        self.num_classes = num_classes
+        
+        self.classifier_head = nn.Linear(self.backbone_fc_size, self.num_classes)
+        
+        if classifier_weights is not None:
+            self.classifier_head.load_state_dict(classifier_weights)
+    
+    def forward(self, x):
+        """Forward method"""
+        feats = self.backbone.forward(x)
+        return self.classifier_head.forward(feats)
+    
+    def set_train(self):
+        """Set network in train mode"""
+        self.backbone.train()
+        self.classifier_head.train()
+        
+    def set_linear_eval(self):
+        """Set backbone in eval and cl in train mode"""
+        self.backbone.eval()
+        self.classifier_head.train()
+    
+    def set_eval(self):
+        """Set network in eval mode"""
+        self.backbone.eval()
+        self.classifier_head.eval()
+    
+    def get_params(self) -> dict:
+        """Return a dictionary of the parameters of the model"""
+        return {'backbone_params': self.backbone.parameters(),
+                'classifier_params': self.classifier_head.parameters(),
+                }
     
     
 class ResNet18MTL(nn.Module):
