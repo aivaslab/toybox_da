@@ -7,6 +7,59 @@ import torch.nn as nn
 import utils
 
 
+class ModelFT:
+    """model for finetuning network"""
+    def __init__(self, network, train_loader, test_loader):
+        self.network = network
+        self.train_loader = train_loader
+        self.test_loader = test_loader
+        self.network.cuda()
+        
+    def train(self, optimizer, scheduler, ep, ep_total):
+        """Finetune the network for 1 epoch"""
+        self.network.set_linear_eval()
+        num_batches = 0
+        ce_loss_total = 0.0
+        src_criterion = nn.CrossEntropyLoss()
+        tqdm_bar = tqdm.tqdm(ncols=150, total=len(self.train_loader))
+        train_loader_iter = iter(self.train_loader)
+        for step in range(1, len(self.train_loader) + 1):
+            optimizer.zero_grad()
+    
+            idx, images, labels = next(train_loader_iter)
+            images, labels = images.cuda(), labels.cuda()
+            logits = self.network.forward(images)
+            loss = src_criterion(logits, labels)
+            loss.backward()
+    
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+    
+            ce_loss_total += loss.item()
+            num_batches += 1
+            tqdm_bar.update(1)
+            tqdm_bar.set_description("Ep: {}/{}  LR: {:.3f}  CE: {:.3f}".format(
+                ep, ep_total, optimizer.param_groups[0]['lr'], ce_loss_total / num_batches))
+
+        tqdm_bar.close()
+        
+    def eval(self, loader):
+        """Evaluate the model on the provided dataloader"""
+        n_total = 0
+        n_correct = 0
+        self.network.set_eval()
+        for _, (idxs, images, labels) in enumerate(loader):
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                logits = self.network.forward(images)
+            top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
+            n_correct += top[0].item() * pred.shape[0]
+            n_total += pred.shape[0]
+        acc = n_correct / n_total
+        return acc
+        
+        
 class MTLModel:
     """Module implementing the MTL method for pretraining the DA model"""
     def __init__(self, network, source_loader, target_loader):

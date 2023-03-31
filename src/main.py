@@ -26,7 +26,7 @@ def main():
     """Main method"""
     num_epochs = 5
     steps = 5
-    b_size = 128
+    b_size = 64
     src_transform_train = transforms.Compose([transforms.ToPILImage(),
                                               transforms.Resize(256),
                                               transforms.RandomResizedCrop(size=224),
