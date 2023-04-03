@@ -123,4 +123,58 @@ class MTLModel:
             n_total += pred.shape[0]
         acc = n_correct / n_total
         return acc
+
+
+class SupModel:
+    """Module implementing the supervised pretraining on source"""
+    
+    def __init__(self, network, source_loader):
+        self.network = network
+        self.source_loader = utils.ForeverDataLoader(source_loader)
+        self.network.cuda()
+    
+    def train(self, optimizer, scheduler, steps, ep, ep_total):
+        """Train model"""
+        self.network.set_train()
+        num_batches = 0
+        ce_loss_total = 0.0
+        src_criterion = nn.CrossEntropyLoss()
+        tqdm_bar = tqdm.tqdm(ncols=150, total=steps)
+        for step in range(1, steps + 1):
+            optimizer.zero_grad()
+            
+            src_idx, src_images, src_labels = self.source_loader.get_next_batch()
+            src_images, src_labels = src_images.cuda(), src_labels.cuda()
+            src_logits = self.network.forward(src_images)
+            src_loss = src_criterion(src_logits, src_labels)
+            
+            src_loss.backward()
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+            
+            ce_loss_total += src_loss.item()
+            num_batches += 1
+            tqdm_bar.update(1)
+            tqdm_bar.set_description("Ep: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}".format(
+                ep, ep_total, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                ce_loss_total / num_batches))
+        
+        tqdm_bar.close()
+    
+    def eval(self, loader):
+        """Evaluate the model on the provided dataloader"""
+        n_total = 0
+        n_correct = 0
+        self.network.set_eval()
+        for _, (idxs, images, labels) in enumerate(loader):
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                logits = self.network.forward(images)
+            top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
+            n_correct += top[0].item() * pred.shape[0]
+            n_total += pred.shape[0]
+        acc = n_correct / n_total
+        return acc
+
     
