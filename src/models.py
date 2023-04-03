@@ -125,6 +125,47 @@ class MTLModel:
         return acc
 
 
+class SSLModel:
+    """Module implementing the SSL method for pretraining the DA model"""
+    
+    def __init__(self, network, loader):
+        self.network = network
+        self.loader = utils.ForeverDataLoader(loader)
+        self.network.cuda()
+    
+    def train(self, optimizer, scheduler, steps, ep, ep_total):
+        """Train model"""
+        self.network.set_train()
+        num_batches = 0
+        ssl_loss_total = 0.0
+        criterion = nn.CrossEntropyLoss()
+        tqdm_bar = tqdm.tqdm(ncols=150, total=steps)
+        for step in range(1, steps + 1):
+            optimizer.zero_grad()
+            
+            idx, images = self.loader.get_next_batch()
+            images = torch.cat(images, dim=0)
+            images = images.cuda()
+            feats = self.network.forward(images)
+            logits, labels = utils.info_nce_loss(features=feats, temp=0.5)
+            loss = criterion(logits, labels)
+            
+            loss.backward()
+            
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+            
+            ssl_loss_total += loss.item()
+            num_batches += 1
+            tqdm_bar.update(1)
+            tqdm_bar.set_description("Ep: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL: {:.3f}".format(
+                ep, ep_total, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                ssl_loss_total / num_batches))
+        
+        tqdm_bar.close()
+
+
 class SupModel:
     """Module implementing the supervised pretraining on source"""
     

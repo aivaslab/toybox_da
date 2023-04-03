@@ -84,6 +84,46 @@ class ResNet18Sup(nn.Module):
         return {'backbone_params': self.backbone.parameters(),
                 'classifier_params': self.classifier_head.parameters(),
                 }
+
+
+class ResNet18SSL(nn.Module):
+    """Definition for SSL network with ResNet18"""
+    
+    def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, ssl_weights=None):
+        super().__init__()
+        self.backbone = ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
+        self.backbone_fc_size = self.backbone.fc_size
+        self.num_classes = num_classes
+        
+        self.ssl_head = nn.Sequential(nn.Linear(self.backbone_fc_size, self.backbone_fc_size),
+                                      nn.ReLU(),
+                                      nn.Linear(self.backbone_fc_size, 128))
+        
+        if ssl_weights is not None:
+            self.ssl_head.load_state_dict(ssl_weights)
+        else:
+            self.ssl_head.apply(utils.weights_init)
+    
+    def forward(self, x):
+        """Forward using only classifier"""
+        feats = self.backbone.forward(x)
+        return self.ssl_head.forward(feats)
+    
+    def set_train(self):
+        """Set network in train mode"""
+        self.backbone.train()
+        self.ssl_head.train()
+    
+    def set_eval(self):
+        """Set network in eval mode"""
+        self.backbone.eval()
+        self.ssl_head.eval()
+    
+    def get_params(self) -> dict:
+        """Return a dictionary of the parameters of the model"""
+        return {'backbone_params': self.backbone.parameters(),
+                'ssl_head': self.ssl_head.parameters()
+                }
     
     
 class ResNet18MTL(nn.Module):
