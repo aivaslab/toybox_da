@@ -1,4 +1,4 @@
-"""Module implementing the pretraining algorithm"""
+"""Module implementing the MTL pretraining algorithm"""
 import numpy as np
 import os
 
@@ -25,7 +25,7 @@ def get_train_test_acc(model, src_loader, trgt_loader):
 def main():
     """Main method"""
     num_epochs = 5
-    steps = 5
+    steps = 3
     b_size = 64
     src_transform_train = transforms.Compose([transforms.ToPILImage(),
                                               transforms.Resize(256),
@@ -68,9 +68,10 @@ def main():
     net = networks.ResNet18MTL(num_classes=12)
     mtl_model = models.MTLModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train)
     
-    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=0.1, weight_decay=1e-4)
-    optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': 0.1})
-    optimizer.add_param_group({'params': net.ssl_head.parameters(), 'lr': 0.1})
+    lr = 1e-7
+    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=lr, weight_decay=1e-4)
+    optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': lr})
+    optimizer.add_param_group({'params': net.ssl_head.parameters(), 'lr': lr})
     
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
                                                          total_iters=2*steps)
@@ -87,7 +88,7 @@ def main():
 
     get_train_test_acc(model=mtl_model, src_loader=src_loader_test, trgt_loader=trgt_loader_test)
 
-    save_dict = {'backbone': net.backbone.state_dict(),
+    save_dict = {'backbone': net.backbone.model.state_dict(),
                  'classifier_head': net.classifier_head.state_dict(),
                  'ssl_head': net.ssl_head.state_dict()
                  }

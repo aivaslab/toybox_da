@@ -66,9 +66,6 @@ class MTLModel:
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
-        self.network.backbone.apply(utils.weights_init)
-        self.network.classifier_head.apply(utils.weights_init)
-        self.network.ssl_head.apply(utils.weights_init)
         self.network.cuda()
         
     def train(self, optimizer, scheduler, steps, ep, ep_total, lmbda):
@@ -126,6 +123,4 @@ class MTLModel:
             n_total += pred.shape[0]
         acc = n_correct / n_total
         return acc
-        
-        
-        
+    

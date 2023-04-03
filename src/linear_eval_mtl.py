@@ -43,13 +43,8 @@ def main():
     
     load_file_name = "../temp/final_model.pt"
     load_file = torch.load(load_file_name)
-    bb_weights = {}
-    
-    for k in load_file['backbone'].keys():
-        new_k = k[6:]
-        bb_weights[new_k] = load_file['backbone'][k]
 
-    net = networks.ResNet18Sup(num_classes=12, backbone_weights=bb_weights,
+    net = networks.ResNet18Sup(num_classes=12, backbone_weights=load_file['backbone'],
                                classifier_weights=load_file['classifier_head'])
     
     for params in net.backbone.parameters():

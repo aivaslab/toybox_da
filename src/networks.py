@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 
+import utils
+
 
 class ResNet18Backbone(nn.Module):
     """ResNet18Backbone without the fully connected layer"""
@@ -16,6 +18,7 @@ class ResNet18Backbone(nn.Module):
             self.model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         else:
             self.model = models.resnet18(weights=None)
+            self.model.apply(utils.weights_init)
         self.fc_size = self.model.fc.in_features
         self.model.fc = nn.Identity()
         
@@ -53,6 +56,8 @@ class ResNet18Sup(nn.Module):
         
         if classifier_weights is not None:
             self.classifier_head.load_state_dict(classifier_weights)
+        else:
+            self.classifier_head.apply(utils.weights_init)
     
     def forward(self, x):
         """Forward method"""
@@ -97,8 +102,13 @@ class ResNet18MTL(nn.Module):
         
         if classifier_weights is not None:
             self.classifier_head.load_state_dict(classifier_weights)
+        else:
+            self.classifier_head.apply(utils.weights_init)
+        
         if ssl_weights is not None:
             self.ssl_head.load_state_dict(ssl_weights)
+        else:
+            self.ssl_head.apply(utils.weights_init)
         
     def forward_all(self, x):
         """Forward method"""
