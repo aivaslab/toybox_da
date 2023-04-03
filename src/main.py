@@ -88,10 +88,12 @@ def main():
 
     get_train_test_acc(model=mtl_model, src_loader=src_loader_test, trgt_loader=trgt_loader_test)
 
-    save_dict = {'backbone': net.backbone.model.state_dict(),
-                 'classifier_head': net.classifier_head.state_dict(),
-                 'ssl_head': net.ssl_head.state_dict()
-                 }
+    save_dict = {
+        'type': 'MTLModel',
+        'backbone': net.backbone.model.state_dict(),
+        'classifier_head': net.classifier_head.state_dict(),
+        'ssl_head': net.ssl_head.state_dict()
+        }
     torch.save(save_dict, TEMP_DIR + "final_model.pt")
 
 
