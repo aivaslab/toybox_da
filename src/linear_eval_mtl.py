@@ -41,11 +41,17 @@ def main():
     data_test = datasets.DatasetIN12(train=False, transform=transform_test, hypertune=True)
     loader_test = torchdata.DataLoader(data_test, batch_size=b_size, shuffle=True, num_workers=4)
     
-    load_file_name = "../temp/final_model.pt"
+    load_file_name = "../temp/final_model_src_pre.pt"
     load_file = torch.load(load_file_name)
 
-    net = networks.ResNet18Sup(num_classes=12, backbone_weights=load_file['backbone'],
-                               classifier_weights=load_file['classifier_head'])
+    if load_file['type'] == 'MTLModel' or load_file['type'] == 'SupModel':
+        net = networks.ResNet18Sup(num_classes=12, backbone_weights=load_file['backbone'],
+                                   classifier_weights=load_file['classifier_head'])
+    elif load_file['type'] == 'SSLModel':
+        net = networks.ResNet18Sup(num_classes=12, backbone_weights=load_file['backbone'])
+    else:
+        raise NotImplementedError("Model type not recognized. Load file types can only be MTLModel, SupModel or "
+                                  "SSLModel")
     
     for params in net.backbone.parameters():
         params.requires_grad = False
