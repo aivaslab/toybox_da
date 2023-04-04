@@ -15,25 +15,40 @@ TEMP_DIR = "../temp/"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 
-def get_train_test_acc(model, src_loader, trgt_loader):
+def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_loader):
     """Get train and test accuracy"""
-    src_acc = model.eval(loader=src_loader)
+    src_tr_acc = model.eval(loader=src_train_loader)
+    src_te_acc = model.eval(loader=src_test_loader)
     trgt_acc = model.eval(loader=trgt_loader)
-    print("Source acc: {:.2f}   Target Acc:{:.2f}".format(src_acc, trgt_acc))
+    print("Source Train acc: {:.2f}   Source Test acc: {:.2f}   Target Acc:{:.2f}".format(
+        src_tr_acc, src_te_acc, trgt_acc))
 
 
 def main():
     """Main method"""
-    num_epochs = 10
-    steps = 20
+    num_epochs = 50
+    steps = 1000
     b_size = 64
+    prob = 0.2
+    color_transforms = [transforms.RandomApply([transforms.ColorJitter(brightness=0.2)], p=prob),
+                        transforms.RandomApply([transforms.ColorJitter(hue=0.2)], p=prob),
+                        transforms.RandomApply([transforms.ColorJitter(saturation=0.2)], p=prob),
+                        transforms.RandomApply([transforms.ColorJitter(contrast=0.2)], p=prob),
+                        transforms.RandomEqualize(p=prob),
+                        transforms.RandomPosterize(bits=4, p=prob),
+                        transforms.RandomAutocontrast(p=prob)
+                        ]
     src_transform_train = transforms.Compose([transforms.ToPILImage(),
                                               transforms.Resize(256),
                                               transforms.RandomResizedCrop(size=224),
+                                              transforms.RandomOrder(color_transforms),
+                                              transforms.RandomHorizontalFlip(),
                                               transforms.ToTensor(),
-                                              transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)])
+                                              transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD),
+                                              transforms.RandomErasing(p=0.5)
+                                              ])
     src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(), train=True, transform=src_transform_train,
-                                            hypertune=True, num_instances=-1, num_images_per_class=1000,
+                                            hypertune=True, num_instances=-1, num_images_per_class=5000,
                                             )
     src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=4)
     
@@ -73,10 +88,12 @@ def main():
     for ep in range(1, num_epochs + 1):
         pre_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                         ep=ep, ep_total=num_epochs)
-        if ep % 20 == 0:
-            get_train_test_acc(model=pre_model, src_loader=src_loader_test, trgt_loader=trgt_loader_test)
+        if ep % 40 == 0:
+            get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
+                               src_test_loader=src_loader_test, trgt_loader=trgt_loader_test)
     
-    get_train_test_acc(model=pre_model, src_loader=src_loader_test, trgt_loader=trgt_loader_test)
+    get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
+                       src_test_loader=src_loader_test, trgt_loader=trgt_loader_test)
     
     save_dict = {
         'type': 'SupModel',
