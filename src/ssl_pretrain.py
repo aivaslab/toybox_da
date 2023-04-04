@@ -17,14 +17,18 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 def main():
     """Main method"""
-    num_epochs = 10
+    num_epochs = 5
     steps = 50
     b_size = 64
-    
+
+    color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
+    gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
     transform_train = transforms.Compose([transforms.ToPILImage(),
+                                          transforms.RandomApply([color_jitter], p=0.8),
+                                          transforms.RandomApply([gaussian_blur], p=0.2),
                                           transforms.Resize(256),
-                                          transforms.ColorJitter(),
                                           transforms.RandomResizedCrop(size=224),
+                                          transforms.RandomHorizontalFlip(),
                                           transforms.ToTensor(),
                                           transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
     data_train = datasets.DatasetIN12SSL(transform=transform_train, fraction=1.0, hypertune=True)
