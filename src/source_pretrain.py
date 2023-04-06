@@ -1,4 +1,5 @@
 """Module implementing the source pretraining algorithm"""
+import argparse
 import numpy as np
 import os
 
@@ -22,13 +23,32 @@ def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_loader):
     trgt_acc = model.eval(loader=trgt_loader)
     print("Source Train acc: {:.2f}   Source Test acc: {:.2f}   Target Acc:{:.2f}".format(
         src_tr_acc, src_te_acc, trgt_acc))
+    
+    
+def get_parser():
+    """Return parser for source pretrain experiments"""
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("-e", "--epochs", default=50, type=int, help="Number of epochs of training")
+    parser.add_argument("-it", "--iters", default=500, type=int, help="Number of training steps per epoch")
+    parser.add_argument("-b", "--bsize", default=128, type=int, help="Batch size for training")
+    parser.add_argument("-w", "--workers", default=4, type=int, help="Number of workers for dataloading")
+    parser.add_argument("-f", "--final", default=False, action='store_true',
+                        help="Use this flag to run experiment on test set")
+    parser.add_argument("-lr", "--lr", default=0.05, type=float, help="Learning rate for the experiment")
+    parser.add_argument("-wd", "--wd", default=1e-5, type=float, help="Weight decay for optimizer")
+    return vars(parser.parse_args())
 
 
 def main():
     """Main method"""
-    num_epochs = 50
-    steps = 1000
-    b_size = 64
+    
+    exp_args = get_parser()
+    num_epochs = exp_args['epochs']
+    steps = exp_args['iters']
+    b_size = exp_args['bsize']
+    n_workers = exp_args['workers']
+    hypertune = not exp_args['final']
+    
     prob = 0.2
     color_transforms = [transforms.RandomApply([transforms.ColorJitter(brightness=0.2)], p=prob),
                         transforms.RandomApply([transforms.ColorJitter(hue=0.2)], p=prob),
@@ -48,9 +68,9 @@ def main():
                                               transforms.RandomErasing(p=0.5)
                                               ])
     src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(), train=True, transform=src_transform_train,
-                                            hypertune=True, num_instances=-1, num_images_per_class=5000,
+                                            hypertune=hypertune, num_instances=-1, num_images_per_class=1000,
                                             )
-    src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=4)
+    src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers)
     
     src_transform_test = transforms.Compose([transforms.ToPILImage(),
                                              transforms.Resize(224),
@@ -58,15 +78,15 @@ def main():
                                              transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)])
     
     src_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(), train=False, transform=src_transform_test,
-                                           hypertune=True)
-    src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=True, num_workers=4)
+                                           hypertune=hypertune)
+    src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=True, num_workers=n_workers)
 
     trgt_transform_test = transforms.Compose([transforms.ToPILImage(),
                                               transforms.Resize(224),
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
-    trgt_data_test = datasets.DatasetIN12(train=True, transform=trgt_transform_test, fraction=1.0, hypertune=True)
-    trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=True, num_workers=4)
+    trgt_data_test = datasets.DatasetIN12(train=False, transform=trgt_transform_test, fraction=1.0, hypertune=hypertune)
+    trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=True, num_workers=n_workers)
     
     # print(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # print(utils.online_mean_and_sd(trgt_loader_test))
@@ -74,9 +94,8 @@ def main():
     net = networks.ResNet18Sup(num_classes=12)
     pre_model = models.SupModel(network=net, source_loader=src_loader_train)
     
-    lr = 0.1
-    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=lr, weight_decay=1e-4)
-    optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': lr})
+    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
+    optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': exp_args['lr']})
     
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
                                                          total_iters=2 * steps)
