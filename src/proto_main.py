@@ -26,8 +26,21 @@ class ProtoPNetTrainer:
         
         self.mean, self.std = datasets.TOYBOX_MEAN, datasets.TOYBOX_STD
         self.num_classes = 12
+
+        saved_file_name = args['saved_model_path'] + "final_training_state.pt"
         
-        self.network = proto_network.ResNet18Proto(num_classes=self.num_classes)
+        if args['saved_model_path'] != "" and os.path.isfile(saved_file_name):
+            print("Loading model weights from {:s}".format(saved_file_name))
+            model_state = torch.load(saved_file_name)
+            
+            self.network = proto_network.ResNet18Proto(num_classes=self.num_classes,
+                                                       backbone_weights=model_state['backbone'],
+                                                       classifier_weights=model_state['classifier'],
+                                                       bottleneck_weights=model_state['bottleneck'],
+                                                       prototypes=model_state['prototypes']
+                                                       )
+        else:
+            self.network = proto_network.ResNet18Proto(num_classes=self.num_classes)
         
         self.train_transform = transforms.Compose([transforms.ToPILImage(mode='RGB'),
                                                    transforms.Resize((224, 224)),
@@ -60,7 +73,7 @@ class ProtoPNetTrainer:
                                                  num_images_per_class=500)
         self.train_loader = torchdata.DataLoader(self.train_data, shuffle=True, batch_size=128, num_workers=4)
         self.test_data = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=False,
-                                                transform=self.train_transform,
+                                                transform=self.test_transform,
                                                 hypertune=True)
         self.test_loader = torchdata.DataLoader(self.test_data, shuffle=False, batch_size=128, num_workers=4)
         
@@ -68,7 +81,7 @@ class ProtoPNetTrainer:
                                                 transform=self.push_transform,
                                                 hypertune=True,
                                                 num_instances=-1,
-                                                num_images_per_class=2000)
+                                                num_images_per_class=500)
         self.push_loader = torchdata.DataLoader(self.push_data, shuffle=False, batch_size=128, num_workers=4)
         
         self.exp_time = datetime.datetime.now()
@@ -150,10 +163,9 @@ class ProtoPNetTrainer:
                 tqdm_bar.update(n_batches - last_tqdm_update)
                 last_tqdm_update = n_batches
             
-            loss = coefs['crs_ent'] * cross_entropy \
-                   + coefs['clst'] * cluster_cost \
-                   + coefs['sep'] * separation_cost \
-                   + coefs['l1'] * l1
+            loss = coefs['crs_ent'] * cross_entropy + coefs['clst'] * cluster_cost \
+                                                    + coefs['sep'] * separation_cost \
+                                                    + coefs['l1'] * l1
             
             optimizer.zero_grad()
             loss.backward()
@@ -196,12 +208,10 @@ class ProtoPNetTrainer:
         joint_optimizer = torch.optim.Adam(joint_optimizer_specs)
         joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=joint_lr_step_size, gamma=0.1)
         
-        warm_optimizer_specs = \
-            [{'params': self.network.bottleneck.parameters(), 'lr': warm_optimizer_lrs['add_on_layers'],
-              'weight_decay': 1e-3},
-             {'params': self.network.prototypes, 'lr': warm_optimizer_lrs['prototype_vectors']},
-             ]
-        warm_optimizer = torch.optim.Adam(warm_optimizer_specs)
+        warm_optimizer = torch.optim.Adam(self.network.bottleneck.parameters(), lr=warm_optimizer_lrs['add_on_layers'],
+                                          weight_decay=1e-3)
+        warm_optimizer.add_param_group({'params': self.network.prototypes,
+                                        'lr': warm_optimizer_lrs['prototype_vectors']})
         
         last_layer_optimizer_specs = [{'params': self.network.classifier.parameters(), 'lr': last_layer_optimizer_lr}]
         last_layer_optimizer = torch.optim.Adam(last_layer_optimizer_specs)
@@ -236,13 +246,19 @@ class ProtoPNetTrainer:
         train_acc, test_acc = self.eval()
         print("Train acc: {:.2f}    Test acc: {:.2f}".format(train_acc, test_acc))
         save_dict = {
-            'network': self.network.state_dict(),
+            'backbone': self.network.backbone.model.state_dict(),
+            'bottleneck': self.network.bottleneck.state_dict(),
+            'classifier': self.network.classifier.state_dict(),
+            'prototypes': self.network.prototypes.data,
             'warmup_optimizer': warm_optimizer.state_dict(),
             'joint_optimizer': joint_optimizer.state_dict(),
             'll_optimizer': last_layer_optimizer.state_dict(),
             'joint_scheduler': joint_lr_scheduler.state_dict()
         }
-        torch.save(save_dict, self.out_path + "final_training_state.pt")
+        
+        out_file_name = self.out_path + "final_training_state.pt"
+        print("Saving model, optimizer and scheduler states to {:s}".format(out_file_name))
+        torch.save(save_dict, out_file_name)
     
     def eval(self):
         """Evaluate the network"""
@@ -278,10 +294,11 @@ def main():
     exp_args = {
         'warmup_epochs': 3,
         'epochs': 10,
-        'final_layer_epochs': 5,
-        'push_steps': 3,
-        'eval_steps': 10,
+        'final_layer_epochs': 2,
+        'push_steps': 5,
+        'eval_steps': 5,
         'dataset': 'toybox',
+        'saved_model_path':  '',  # '../temp/TOYBOX/exp_Apr-06-2023-13-26/',
     }
     trainer = ProtoPNetTrainer(args=exp_args)
     trainer.run_training()

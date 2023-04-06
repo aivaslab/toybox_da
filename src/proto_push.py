@@ -57,7 +57,7 @@ def push_prototypes(dataloader,  # pytorch dataloader (must be unnormalized in [
     prototype_update = np.reshape(global_min_fmap_patches, tuple(prototype_shape))
     network.prototypes.data.copy_(torch.tensor(prototype_update, dtype=torch.float32).cuda())
     end_time = time.time()
-    print("Time taken for pushing: {:2}f".format(end_time - start_time))
+    print("Time taken for pushing: {:2f}".format(end_time - start_time))
 
 
 # update each prototype for current search batch
