@@ -21,6 +21,50 @@ TOYBOX_CLASSES = ["airplane", "ball", "car", "cat", "cup", "duck", "giraffe", "h
 TOYBOX_VIDEOS = ("rxplus", "rxminus", "ryplus", "ryminus", "rzplus", "rzminus")
 
 
+class DatasetIN12All(torchdata.Dataset):
+    """
+    This class implements the IN12 dataset
+    """
+    
+    def __init__(self, train=True, transform=None, hypertune=True):
+        self.train = train
+        self.transform = transform
+        self.root = IN12_DATA_PATH
+        self.hypertune = hypertune
+        
+        if self.train:
+            if self.hypertune:
+                self.images_file = self.root + "dev.pickle"
+                self.labels_file = self.root + "dev.csv"
+            else:
+                self.images_file = self.root + "train.pickle"
+                self.labels_file = self.root + "train.csv"
+        else:
+            if self.hypertune:
+                self.images_file = self.root + "val.pickle"
+                self.labels_file = self.root + "val.csv"
+            else:
+                self.images_file = self.root + "test.pickle"
+                self.labels_file = self.root + "test.csv"
+        
+        self.images = pickle.load(open(self.images_file, "rb"))
+        self.labels = list(csv.DictReader(open(self.labels_file, "r")))
+    
+    def __len__(self):
+        return len(self.images)
+    
+    def __getitem__(self, index):
+        im = np.array(cv2.imdecode(self.images[index], 3))
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        label = int(self.labels[index]["Class ID"])
+        if self.transform is not None:
+            im = self.transform(im)
+        return (index, index), im, label
+    
+    def __str__(self):
+        return "IN12 Supervised All"
+
+
 class DatasetIN12(torchdata.Dataset):
     """
     This class implements the IN12 dataset
@@ -114,13 +158,68 @@ class DatasetIN12SSL(DatasetIN12):
         return "IN12 SSL"
 
 
+class ToyboxDatasetAll(torchdata.Dataset):
+    """
+    Class for loading Toybox data for classification. Provides access to all images for specified split
+    Use case is for getting activations for all images
+    """
+    
+    def __init__(self, train=True, transform=None, hypertune=True):
+        self.data_path = TOYBOX_DATA_PATH
+        self.train = train
+        self.transform = transform
+        self.hypertune = hypertune
+        self.label_key = 'Class ID'
+        
+        if self.train:
+            if self.hypertune:
+                self.images_file = self.data_path + "toybox_data_interpolated_cropped_dev.pickle"
+                self.labels_file = self.data_path + "toybox_data_interpolated_cropped_dev.csv"
+            else:
+                self.images_file = self.data_path + "toybox_data_interpolated_cropped_train.pickle"
+                self.labels_file = self.data_path + "toybox_data_interpolated_cropped_train.csv"
+                
+        else:
+            if self.hypertune:
+                self.images_file = self.data_path + "toybox_data_interpolated_cropped_val.pickle"
+                self.labels_file = self.data_path + "toybox_data_interpolated_cropped_val.csv"
+            else:
+                self.images_file = self.data_path + "toybox_data_interpolated_cropped_test.pickle"
+                self.labels_file = self.data_path + "toybox_data_interpolated_cropped_test.csv"
+                
+        super().__init__()
+
+        with open(self.images_file, "rb") as pickleFile:
+            self.data = pickle.load(pickleFile)
+        with open(self.labels_file, "r") as csvFile:
+            self.csvFile = list(csv.DictReader(csvFile))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        img = cv2.imdecode(self.data[index], 3)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = np.array(img)
+        label = int(self.csvFile[index][self.label_key])
+    
+        if self.transform is not None:
+            imgs = self.transform(img)
+        else:
+            imgs = img
+        return (index, index), imgs, label
+
+    def __str__(self):
+        return "ToyboxAll"
+
+
 class ToyboxDataset(torchdata.Dataset):
     """
     Class for loading Toybox data for classification. The user can specify the number of instances per class
     and the number of images per class. If number of images per class is -1, all images are selected.
     """
     
-    def __init__(self, rng, train=True, transform=None, size=224, hypertune=False, num_instances=-1,
+    def __init__(self, rng, train=True, transform=None, size=224, hypertune=True, num_instances=-1,
                  num_images_per_class=-1, views=TOYBOX_VIDEOS):
         
         self.data_path = TOYBOX_DATA_PATH
