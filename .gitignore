@@ -1,6 +1,7 @@
 **/data*/
 **/runs*/
 **/out*/
+**/temp*/
 .idea/
 /*.*
 !.gitignore

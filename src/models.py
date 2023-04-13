@@ -3,6 +3,7 @@ import tqdm
 
 import torch
 import torch.nn as nn
+import torch.utils.tensorboard as tb
 
 import utils
 
@@ -57,7 +58,7 @@ class ModelFT:
             n_correct += top[0].item() * pred.shape[0]
             n_total += pred.shape[0]
         acc = n_correct / n_total
-        return acc
+        return round(acc, 2)
         
         
 class MTLModel:
@@ -122,7 +123,7 @@ class MTLModel:
             n_correct += top[0].item() * pred.shape[0]
             n_total += pred.shape[0]
         acc = n_correct / n_total
-        return acc
+        return round(acc, 2)
 
 
 class SSLModel:
@@ -174,7 +175,7 @@ class SupModel:
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.network.cuda()
     
-    def train(self, optimizer, scheduler, steps, ep, ep_total):
+    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
         self.network.set_train()
         num_batches = 0
@@ -200,6 +201,23 @@ class SupModel:
             tqdm_bar.set_description("Ep: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}".format(
                 ep, ep_total, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                 ce_loss_total / num_batches))
+            
+            writer.add_scalars(
+                main_tag="training_loss",
+                tag_scalar_dict={
+                    'ce_loss_ep': ce_loss_total / num_batches,
+                    'ce_loss_batch': src_loss.item(),
+                },
+                global_step=(ep - 1) * steps + num_batches,
+            )
+            writer.add_scalars(
+                main_tag="training_lr",
+                tag_scalar_dict={
+                    'bb': optimizer.param_groups[0]['lr'],
+                    'fc': optimizer.param_groups[1]['lr'],
+                },
+                global_step=(ep - 1) * steps + num_batches,
+            )
         
         tqdm_bar.close()
     
@@ -216,6 +234,6 @@ class SupModel:
             n_correct += top[0].item() * pred.shape[0]
             n_total += pred.shape[0]
         acc = n_correct / n_total
-        return acc
+        return round(acc, 2)
 
     
