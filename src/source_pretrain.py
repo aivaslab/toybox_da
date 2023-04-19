@@ -87,8 +87,10 @@ def main():
                         transforms.RandomAutocontrast(p=prob)
                         ]
     src_transform_train = transforms.Compose([transforms.ToPILImage(),
-                                              transforms.Resize(256),
-                                              transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0)),
+                                              transforms.Resize((256, 256)),
+                                              transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
+                                                                           interpolation=
+                                                                           transforms.InterpolationMode.BICUBIC),
                                               transforms.RandomOrder(color_transforms),
                                               transforms.RandomHorizontalFlip(),
                                               transforms.ToTensor(),
