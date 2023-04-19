@@ -70,6 +70,8 @@ def main():
     b_size = exp_args['bsize']
     n_workers = exp_args['workers']
     hypertune = not exp_args['final']
+    num_instances = exp_args['instances']
+    num_images_per_class = exp_args['images']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -94,8 +96,10 @@ def main():
                                               transforms.RandomErasing(p=0.5)
                                               ])
     src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(), train=True, transform=src_transform_train,
-                                            hypertune=hypertune, num_instances=-1, num_images_per_class=1000,
+                                            hypertune=hypertune, num_instances=num_instances,
+                                            num_images_per_class=num_images_per_class,
                                             )
+    print(src_data_train, len(src_data_train))
     src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers)
     
     src_transform_test = transforms.Compose([transforms.ToPILImage(),
@@ -120,7 +124,7 @@ def main():
     net = networks.ResNet18Sup(num_classes=12)
     pre_model = models.SupModel(network=net, source_loader=src_loader_train)
     
-    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
+    optimizer = torch.optim.Adam(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
     optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': exp_args['lr']})
     
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
