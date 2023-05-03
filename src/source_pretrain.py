@@ -44,11 +44,12 @@ def get_parser():
     parser.add_argument("-b", "--bsize", default=128, type=int, help="Batch size for training")
     parser.add_argument("-w", "--workers", default=4, type=int, help="Number of workers for dataloading")
     parser.add_argument("-f", "--final", default=False, action='store_true',
-                        help="Use this flag to run experiment on test set")
+                        help="Use this flag to run experiment on train+val set")
     parser.add_argument("-lr", "--lr", default=0.05, type=float, help="Learning rate for the experiment")
     parser.add_argument("-wd", "--wd", default=1e-5, type=float, help="Weight decay for optimizer")
     parser.add_argument("--instances", default=-1, type=int, help="Set number of toybox instances to train on")
     parser.add_argument("--images", default=5000, type=int, help="Set number of images per class to train on")
+    parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
     return vars(parser.parse_args())
 
 
@@ -65,6 +66,7 @@ def main():
     """Main method"""
     
     exp_args = get_parser()
+    exp_args['seed'] = None if exp_args['seed'] == -1 else exp_args['seed']
     num_epochs = exp_args['epochs']
     steps = exp_args['iters']
     b_size = exp_args['bsize']
@@ -105,7 +107,7 @@ def main():
     src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers)
     
     src_transform_test = transforms.Compose([transforms.ToPILImage(),
-                                             transforms.Resize(224),
+                                             transforms.Resize((224, 224)),
                                              transforms.ToTensor(),
                                              transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)])
     
@@ -114,7 +116,7 @@ def main():
     src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
 
     trgt_transform_test = transforms.Compose([transforms.ToPILImage(),
-                                              transforms.Resize(224),
+                                              transforms.Resize((224, 224)),
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
     trgt_data_test = datasets.DatasetIN12(train=False, transform=trgt_transform_test, fraction=1.0, hypertune=hypertune)
