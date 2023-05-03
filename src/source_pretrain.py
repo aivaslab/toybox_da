@@ -99,7 +99,8 @@ def main():
                                               transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD),
                                               transforms.RandomErasing(p=0.5)
                                               ])
-    src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(), train=True, transform=src_transform_train,
+    src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['seed']), train=True,
+                                            transform=src_transform_train,
                                             hypertune=hypertune, num_instances=num_instances,
                                             num_images_per_class=num_images_per_class,
                                             )
