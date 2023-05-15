@@ -12,6 +12,7 @@ import torch.utils.tensorboard as tb
 import datasets
 import models
 import networks
+import utils
 
 TEMP_DIR = "../temp/TB_SUP/"
 OUT_DIR = "../out/TB_SUP/"
@@ -19,13 +20,14 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
-def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_loader, writer: tb.SummaryWriter, step):
+def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_loader, writer: tb.SummaryWriter, step: int,
+                       logger):
     """Get train and test accuracy"""
     src_tr_acc = model.eval(loader=src_train_loader)
     src_te_acc = model.eval(loader=src_test_loader)
     trgt_acc = model.eval(loader=trgt_loader)
-    print("Source Train acc: {:.2f}   Source Test acc: {:.2f}   Target Acc:{:.2f}".format(
-        src_tr_acc, src_te_acc, trgt_acc))
+    logger.info("Source Train acc: {:.2f}   Source Test acc: {:.2f}   Target Acc:{:.2f}".format(
+                src_tr_acc, src_te_acc, trgt_acc))
     writer.add_scalars(main_tag="Accuracies",
                        tag_scalar_dict={
                            'tb_train': src_tr_acc,
@@ -50,6 +52,8 @@ def get_parser():
     parser.add_argument("--instances", default=-1, type=int, help="Set number of toybox instances to train on")
     parser.add_argument("--images", default=5000, type=int, help="Set number of images per class to train on")
     parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
+    parser.add_argument("--log", choices=["debug", "info", "warning", "error", "critical"],
+                        default="info", type=str)
     return vars(parser.parse_args())
 
 
@@ -78,6 +82,7 @@ def main():
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
     tb_writer = tb.SummaryWriter(log_dir=tb_path)
+    logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt")
     
     prob = 0.2
     color_transforms = [transforms.RandomApply([transforms.ColorJitter(brightness=0.2)], p=prob),
@@ -103,7 +108,7 @@ def main():
                                             hypertune=hypertune, num_instances=num_instances,
                                             num_images_per_class=num_images_per_class,
                                             )
-    print(src_data_train, len(src_data_train))
+    logger.debug(f"Dataset: {src_data_train}  Size: {len(src_data_train)}")
     src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers)
     
     src_transform_test = transforms.Compose([transforms.ToPILImage(),
@@ -122,11 +127,11 @@ def main():
     trgt_data_test = datasets.DatasetIN12(train=False, transform=trgt_transform_test, fraction=1.0, hypertune=hypertune)
     trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
     
-    # print(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
-    # print(utils.online_mean_and_sd(trgt_loader_test))
+    # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
+    # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
     
     net = networks.ResNet18Sup(num_classes=12)
-    pre_model = models.SupModel(network=net, source_loader=src_loader_train)
+    pre_model = models.SupModel(network=net, source_loader=src_loader_train, logger=logger)
     
     optimizer = torch.optim.Adam(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
     optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': exp_args['lr']})
@@ -140,7 +145,7 @@ def main():
 
     get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                        src_test_loader=src_loader_test, trgt_loader=trgt_loader_test,
-                       writer=tb_writer, step=0)
+                       writer=tb_writer, step=0, logger=logger)
     
     for ep in range(1, num_epochs + 1):
         pre_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
@@ -148,12 +153,12 @@ def main():
         if ep % 20 == 0 and ep != num_epochs:
             get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                src_test_loader=src_loader_test, trgt_loader=trgt_loader_test,
-                               writer=tb_writer, step=ep*steps)
+                               writer=tb_writer, step=ep*steps, logger=logger)
 
     src_tr_acc, src_te_acc, trgt_acc = get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                                           src_test_loader=src_loader_test,
                                                           trgt_loader=trgt_loader_test,
-                                                          writer=tb_writer, step=num_epochs * steps)
+                                                          writer=tb_writer, step=num_epochs * steps, logger=logger)
     
     tb_writer.close()
     save_dict = {
@@ -169,7 +174,7 @@ def main():
     exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")
     exp_args['train_transform'] = str(src_transform_train)
     save_args(path=tb_path, args=exp_args)
-    print("Experimental details and results saved to {}".format(tb_path))
+    logger.info("Experimental details and results saved to {}".format(tb_path))
     
 
 if __name__ == "__main__":

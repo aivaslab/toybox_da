@@ -170,9 +170,10 @@ class SSLModel:
 class SupModel:
     """Module implementing the supervised pretraining on source"""
     
-    def __init__(self, network, source_loader):
+    def __init__(self, network, source_loader, logger):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
+        self.logger = logger
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
@@ -220,6 +221,9 @@ class SupModel:
             )
         
         tqdm_bar.close()
+        self.logger.info("Ep: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}".format(
+                ep, ep_total, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                ce_loss_total / num_batches))
     
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""

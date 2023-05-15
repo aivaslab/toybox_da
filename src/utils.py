@@ -7,6 +7,30 @@ import logging
 import torch.nn.functional as F
 
 
+COLOR = {
+    "HEADER": "\033[95m",
+    "BLUE": "\033[94m",
+    "GREEN": "\033[92m",
+    "RED": "\033[91m",
+    "ENDC": "\033[0m",
+}
+LOG_FORMAT_TERMINAL = '%(asctime)s:' + COLOR['GREEN'] + '%(filename)s' + COLOR['ENDC'] + ':%(lineno)s:' + COLOR['RED'] \
+                      + '%(levelname)s' + COLOR['ENDC'] + ': %(message)s'
+LOG_FORMAT_FILE = '%(asctime)s:%(filename)s:%(lineno)s:%(levelname)s:%(message)s'
+
+
+def create_logger(log_level_str: str, log_file_name: str):
+    """Create and return logger"""
+    log_level = getattr(logging, log_level_str.upper())
+    logging.basicConfig(format=LOG_FORMAT_TERMINAL, level=log_level)
+    logger = logging.getLogger(__name__)
+    logfile_handler = logging.FileHandler(log_file_name)
+    logging_formatter = logging.Formatter(LOG_FORMAT_FILE)
+    logfile_handler.setFormatter(logging_formatter)
+    logger.addHandler(logfile_handler)
+    return logger
+
+
 class ForeverDataLoader:
     """Class that returns the next batch of data"""
     
