@@ -1,5 +1,5 @@
 """Module implementing the MTL pretraining task for Toybox->IN-12"""
-import tqdm
+import time
 
 import torch
 import torch.nn as nn
@@ -10,10 +10,11 @@ import utils
 
 class ModelFT:
     """model for finetuning network"""
-    def __init__(self, network, train_loader, test_loader):
+    def __init__(self, network, train_loader, test_loader, logger):
         self.network = network
         self.train_loader = train_loader
         self.test_loader = test_loader
+        self.logger = logger
         self.network.cuda()
         
     def train(self, optimizer, scheduler, ep, ep_total):
@@ -22,9 +23,11 @@ class ModelFT:
         num_batches = 0
         ce_loss_total = 0.0
         src_criterion = nn.CrossEntropyLoss()
-        tqdm_bar = tqdm.tqdm(ncols=150, total=len(self.train_loader))
         train_loader_iter = iter(self.train_loader)
-        for step in range(1, len(self.train_loader) + 1):
+        steps = len(self.train_loader)
+        halfway = steps / 2.0
+        start_time = time.time()
+        for step in range(1, steps + 1):
             optimizer.zero_grad()
     
             idx, images, labels = next(train_loader_iter)
@@ -39,11 +42,17 @@ class ModelFT:
     
             ce_loss_total += loss.item()
             num_batches += 1
-            tqdm_bar.update(1)
-            tqdm_bar.set_description("Ep: {}/{}  LR: {:.3f}  CE: {:.3f}".format(
-                ep, ep_total, optimizer.param_groups[0]['lr'], ce_loss_total / num_batches))
+            
+            if 0 <= step - halfway < 1:
+                self.logger.info("Ep: {}/{}  Step: {}/{}  LR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
+                    ep, ep_total, step, steps, optimizer.param_groups[0]['lr'], ce_loss_total / num_batches,
+                    time.time() - start_time)
+                )
 
-        tqdm_bar.close()
+        self.logger.info("Ep: {}/{}  Step: {}/{}  LR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
+            ep, ep_total, steps, steps, optimizer.param_groups[0]['lr'], ce_loss_total / num_batches,
+            time.time() - start_time)
+        )
         
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
@@ -63,10 +72,11 @@ class ModelFT:
         
 class MTLModel:
     """Module implementing the MTL method for pretraining the DA model"""
-    def __init__(self, network, source_loader, target_loader):
+    def __init__(self, network, source_loader, target_loader, logger):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
+        self.logger = logger
         self.network.cuda()
         
     def train(self, optimizer, scheduler, steps, ep, ep_total, lmbda):
@@ -77,7 +87,8 @@ class MTLModel:
         ssl_loss_total = 0.0
         src_criterion = nn.CrossEntropyLoss()
         trgt_criterion = nn.CrossEntropyLoss()
-        tqdm_bar = tqdm.tqdm(ncols=150, total=steps)
+        halfway = steps / 2.0
+        start_time = time.time()
         for step in range(1, steps+1):
             optimizer.zero_grad()
             
@@ -103,12 +114,21 @@ class MTLModel:
             ce_loss_total += src_loss.item()
             ssl_loss_total += trgt_loss.item()
             num_batches += 1
-            tqdm_bar.update(1)
-            tqdm_bar.set_description("Ep: {}/{}  BLR: {:.3f}  CLR: {:.3f}  SLR: {:.3f}  CE: {:.3f}  SSL: {:.3f}".format(
-                ep, ep_total, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
-                optimizer.param_groups[2]['lr'], ce_loss_total/num_batches, ssl_loss_total/num_batches))
-            
-        tqdm_bar.close()
+            if 0 <= step - halfway < 1:
+                self.logger.info("Ep: {}/{} Step:{}/{}  BLR: {:.3f}  CLR: {:.3f}  SLR: {:.3f}  CE: {:.3f}  SSL: {:.3f}"
+                                 "T: {:.2f}s".
+                                 format(ep, ep_total, step, steps,
+                                        optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                                        optimizer.param_groups[2]['lr'], ce_loss_total/num_batches,
+                                        ssl_loss_total/num_batches, time.time() - start_time)
+                                 )
+        self.logger.info("Ep: {}/{} Step:{}/{}  BLR: {:.3f}  CLR: {:.3f}  SLR: {:.3f}  CE: {:.3f}  SSL: {:.3f}"
+                         "T: {:.2f}s".
+                         format(ep, ep_total, steps, steps,
+                                optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                                optimizer.param_groups[2]['lr'], ce_loss_total / num_batches,
+                                ssl_loss_total / num_batches, time.time() - start_time)
+                         )
         
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
@@ -129,9 +149,10 @@ class MTLModel:
 class SSLModel:
     """Module implementing the SSL method for pretraining the DA model"""
     
-    def __init__(self, network, loader):
+    def __init__(self, network, loader, logger):
         self.network = network
         self.loader = utils.ForeverDataLoader(loader)
+        self.logger = logger
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total):
@@ -140,7 +161,8 @@ class SSLModel:
         num_batches = 0
         ssl_loss_total = 0.0
         criterion = nn.CrossEntropyLoss()
-        tqdm_bar = tqdm.tqdm(ncols=150, total=steps)
+        halfway = steps / 2.0
+        start_time = time.time()
         for step in range(1, steps + 1):
             optimizer.zero_grad()
             
@@ -159,12 +181,13 @@ class SSLModel:
             
             ssl_loss_total += loss.item()
             num_batches += 1
-            tqdm_bar.update(1)
-            tqdm_bar.set_description("Ep: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL: {:.3f}".format(
-                ep, ep_total, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
-                ssl_loss_total / num_batches))
-        
-        tqdm_bar.close()
+            if 0 <= steps - halfway < 1:
+                self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
+                    ep, ep_total, step, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                    ssl_loss_total / num_batches, time.time() - start_time))
+        self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
+            ep, ep_total, steps, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+            ssl_loss_total / num_batches, time.time() - start_time))
 
 
 class SupModel:
@@ -182,7 +205,8 @@ class SupModel:
         num_batches = 0
         ce_loss_total = 0.0
         src_criterion = nn.CrossEntropyLoss()
-        tqdm_bar = tqdm.tqdm(ncols=150, total=steps)
+        halfway = steps / 2.0
+        start_time = time.time()
         for step in range(1, steps + 1):
             optimizer.zero_grad()
             
@@ -198,10 +222,11 @@ class SupModel:
             
             ce_loss_total += src_loss.item()
             num_batches += 1
-            tqdm_bar.update(1)
-            tqdm_bar.set_description("Ep: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}".format(
-                ep, ep_total, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
-                ce_loss_total / num_batches))
+            
+            if 0 <= step - halfway < 1:
+                self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
+                    ep, ep_total, step, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                    ce_loss_total / num_batches, time.time() - start_time))
             
             writer.add_scalars(
                 main_tag="training_loss",
@@ -219,12 +244,10 @@ class SupModel:
                 },
                 global_step=(ep - 1) * steps + num_batches,
             )
+        self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
+            ep, ep_total, steps, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+            ce_loss_total / num_batches, time.time() - start_time))
         
-        tqdm_bar.close()
-        self.logger.info("Ep: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}".format(
-                ep, ep_total, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
-                ce_loss_total / num_batches))
-    
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
         n_total = 0
