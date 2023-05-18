@@ -9,7 +9,8 @@ import utils
 class ResNet18JAN(nn.Module):
     """Definition for JAN network with ResNet18"""
     
-    def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, classifier_weights=None):
+    def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, bottleneck_weights=None,
+                 classifier_weights=None):
         super().__init__()
         self.backbone = networks.ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
         self.backbone_fc_size = self.backbone.fc_size
@@ -22,9 +23,12 @@ class ResNet18JAN(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.5)
         )
+        if bottleneck_weights is not None:
+            self.bottleneck.load_state_dict(bottleneck_weights)
+        else:
+            self.bottleneck.apply(utils.weights_init)
         
         self.classifier_head = nn.Linear(self.bottleneck_dim, self.num_classes)
-        
         if classifier_weights is not None:
             self.classifier_head.load_state_dict(classifier_weights)
         else:

@@ -56,6 +56,10 @@ def get_parser():
     parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
     parser.add_argument("--log", choices=["debug", "info", "warning", "error", "critical"],
                         default="info", type=str)
+    parser.add_argument("--pretrained", default=False, action='store_true',
+                        help="Use this flag to start from pretrained network")
+    parser.add_argument("--load-path", default="", type=str,
+                        help="Use this option to specify the directory from which model weights should be loaded")
     return vars(parser.parse_args())
 
 
@@ -101,7 +105,7 @@ def main():
                                             hypertune=hypertune, num_instances=num_instances,
                                             num_images_per_class=num_images_per_class,
                                             )
-    logger.debug(f"Dataset: {src_data_train}  Size: {len(src_data_train)}")
+    logger.debug(f"Source dataset: {src_data_train}  Size: {len(src_data_train)}")
     src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
                                             drop_last=True)
     
@@ -113,23 +117,46 @@ def main():
     src_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(), train=False, transform=src_transform_test,
                                            hypertune=hypertune)
     src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
+
+    trgt_transform_train = transforms.Compose([transforms.ToPILImage(),
+                                              transforms.Resize((224, 224)),
+                                              transforms.ToTensor(),
+                                              transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
+    trgt_data_train = datasets.DatasetIN12(train=True, transform=trgt_transform_train, fraction=1.0,
+                                           hypertune=hypertune)
+    trgt_loader_train = torchdata.DataLoader(trgt_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
+                                             drop_last=True)
     
     trgt_transform_test = transforms.Compose([transforms.ToPILImage(),
                                               transforms.Resize((224, 224)),
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
     trgt_data_test = datasets.DatasetIN12(train=False, transform=trgt_transform_test, fraction=1.0, hypertune=hypertune)
-    trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=True, num_workers=n_workers,
-                                            drop_last=True)
+    trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
     
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
     
-    net = networks_da.ResNet18JAN(pretrained=True, num_classes=12)
-    model = models_da.JANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_test,
+    if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
+        load_file_path = exp_args['load_path'] + "final_model.pt"
+        load_file = torch.load(load_file_path)
+        logger.info(f"Loading model weights from {load_file_path} ({load_file['type']})")
+        bb_wts = load_file['backbone']
+        btlnk_wts = load_file['bottleneck'] if 'bottleneck' in load_file.keys() else None
+        cl_wts = load_file['classifier'] if (btlnk_wts is not None and 'classifier' in load_file.keys()) else None
+        net = networks_da.ResNet18JAN(num_classes=12, backbone_weights=bb_wts, bottleneck_weights=btlnk_wts,
+                                      classifier_weights=cl_wts)
+    else:
+        net = networks_da.ResNet18JAN(num_classes=12, pretrained=exp_args['pretrained'])
+    
+    model = models_da.JANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
                                logger=logger, combined_batch=combined_batch)
     
-    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=0.1*exp_args['lr'], weight_decay=exp_args['wd'])
+    bb_lr_wt = 0.1 if (exp_args['pretrained'] or
+                       (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
+        else 1.0
+        
+    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=bb_lr_wt*exp_args['lr'], weight_decay=exp_args['wd'])
     optimizer.add_param_group({'params': net.bottleneck.parameters(), 'lr': exp_args['lr']})
     optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': exp_args['lr']})
     
@@ -155,10 +182,10 @@ def main():
     
     tb_writer.close()
     save_dict = {
-        'type': 'ResNet18JAN',
+        'type': net.__class__.__name__,
         'backbone': net.backbone.model.state_dict(),
         'bottleneck': net.bottleneck.state_dict(),
-        'classifier_head': net.classifier_head.state_dict(),
+        'classifier': net.classifier_head.state_dict(),
     }
     torch.save(save_dict, tb_path + "final_model.pt")
     
