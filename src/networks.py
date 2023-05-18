@@ -89,11 +89,10 @@ class ResNet18Sup(nn.Module):
 class ResNet18SSL(nn.Module):
     """Definition for SSL network with ResNet18"""
     
-    def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, ssl_weights=None):
+    def __init__(self, pretrained=False, backbone_weights=None, ssl_weights=None):
         super().__init__()
         self.backbone = ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
         self.backbone_fc_size = self.backbone.fc_size
-        self.num_classes = num_classes
         
         self.ssl_head = nn.Sequential(nn.Linear(self.backbone_fc_size, self.backbone_fc_size),
                                       nn.ReLU(),

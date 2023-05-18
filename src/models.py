@@ -155,7 +155,7 @@ class SSLModel:
         self.logger = logger
         self.network.cuda()
     
-    def train(self, optimizer, scheduler, steps, ep, ep_total):
+    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
         self.network.set_train()
         num_batches = 0
@@ -181,10 +181,27 @@ class SSLModel:
             
             ssl_loss_total += loss.item()
             num_batches += 1
-            if 0 <= steps - halfway < 1:
+            if 0 <= step - halfway < 1:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
                     ep, ep_total, step, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                     ssl_loss_total / num_batches, time.time() - start_time))
+
+            writer.add_scalars(
+                main_tag="training_loss",
+                tag_scalar_dict={
+                    'ssl_loss_ep': ssl_loss_total / num_batches,
+                    'ssl_loss_batch': loss.item(),
+                },
+                global_step=(ep - 1) * steps + num_batches,
+            )
+            writer.add_scalars(
+                main_tag="training_lr",
+                tag_scalar_dict={
+                    'bb': optimizer.param_groups[0]['lr'],
+                    'ssl_head': optimizer.param_groups[1]['lr'],
+                },
+                global_step=(ep - 1) * steps + num_batches,
+            )
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
             ep, ep_total, steps, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
             ssl_loss_total / num_batches, time.time() - start_time))
