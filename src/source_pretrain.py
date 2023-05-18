@@ -54,6 +54,10 @@ def get_parser():
     parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
     parser.add_argument("--log", choices=["debug", "info", "warning", "error", "critical"],
                         default="info", type=str)
+    parser.add_argument("--load-path", default="", type=str,
+                        help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--pretrained", default=False, action='store_true',
+                        help="Use this flag to start from network pretrained on ILSVRC")
     return vars(parser.parse_args())
 
 
@@ -131,7 +135,15 @@ def main():
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
     
-    net = networks.ResNet18Sup(num_classes=12)
+    if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
+        load_file_path = exp_args['load_path'] + "final_model.pt"
+        load_file = torch.load(load_file_path)
+        logger.info(f"Loading model weights from {load_file_path} ({load_file['type']})")
+        bb_wts = load_file['backbone']
+        cl_wts = load_file['classifier'] if 'classifier' in load_file.keys() else None
+        net = networks.ResNet18Sup(num_classes=12, backbone_weights=bb_wts, classifier_weights=cl_wts)
+    else:
+        net = networks.ResNet18Sup(num_classes=12, pretrained=exp_args['pretrained'])
     pre_model = models.SupModel(network=net, source_loader=src_loader_train, logger=logger)
     
     optimizer = torch.optim.Adam(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
@@ -163,9 +175,9 @@ def main():
     
     tb_writer.close()
     save_dict = {
-        'type': 'SupModel',
+        'type': net.__class__.__name__,
         'backbone': net.backbone.model.state_dict(),
-        'classifier_head': net.classifier_head.state_dict(),
+        'classifier': net.classifier_head.state_dict(),
         }
     torch.save(save_dict, tb_path + "final_model.pt")
     
