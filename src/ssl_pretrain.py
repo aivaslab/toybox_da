@@ -13,8 +13,8 @@ import models
 import networks
 import utils
 
-TEMP_DIR = "../temp/TB_SSL/"
-OUT_DIR = "../out/TB_SSL/"
+TEMP_DIR = "../temp/IN12_SSL/"
+OUT_DIR = "../out/IN12_SSL/"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 
