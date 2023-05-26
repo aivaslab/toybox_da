@@ -77,7 +77,7 @@ class MTLModel:
         self.logger = logger
         self.network.cuda()
         
-    def train(self, optimizer, scheduler, steps, ep, ep_total, lmbda):
+    def train(self, optimizer, scheduler, steps, ep, ep_total, lmbda, writer: tb.SummaryWriter):
         """Train model"""
         self.network.set_train()
         num_batches = 0
@@ -112,6 +112,28 @@ class MTLModel:
             ce_loss_total += src_loss.item()
             ssl_loss_total += trgt_loss.item()
             num_batches += 1
+
+            writer.add_scalars(
+                main_tag="training_loss",
+                tag_scalar_dict={
+                    'ssl_loss_ep': ssl_loss_total / num_batches,
+                    'ssl_loss_batch': trgt_loss.item(),
+                    'ce_loss_ep': ce_loss_total / num_batches,
+                    'ce_loss_batch': src_loss.item(),
+                    'total_loss_batch': total_loss.item()
+                },
+                global_step=(ep - 1) * steps + num_batches,
+            )
+            writer.add_scalars(
+                main_tag="training_lr",
+                tag_scalar_dict={
+                    'bb': optimizer.param_groups[0]['lr'],
+                    'cl_head': optimizer.param_groups[1]['lr'],
+                    'ssl_head': optimizer.param_groups[2]['lr'],
+                },
+                global_step=(ep - 1) * steps + num_batches,
+            )
+            
             if 0 <= step - halfway < 1:
                 self.logger.info("Ep: {}/{} Step:{}/{}  BLR: {:.3f}  CLR: {:.3f}  SLR: {:.3f}  CE: {:.3f}  SSL: {:.3f}"
                                  "T: {:.2f}s".
