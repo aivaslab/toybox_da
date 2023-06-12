@@ -9,11 +9,15 @@ import utils
 
 class ResNet18Backbone(nn.Module):
     """ResNet18Backbone without the fully connected layer"""
-    def __init__(self, pretrained=False, weights=None):
+    def __init__(self, pretrained=False, weights=None, tb_writer=None, track_gradients=False):
         super().__init__()
         assert not pretrained or weights is None, \
             "Resnet18 init asking for both ILSVRC init and pretrained_weights provided. Choose one..."
         self.pretrained = pretrained
+        self.tb_writer = tb_writer
+        self.track_gradients = track_gradients
+        assert not self.track_gradients or self.tb_writer is not None, \
+            "track_gradients is True, but tb_writer not defined..."
         if self.pretrained:
             self.model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         else:
@@ -25,9 +29,36 @@ class ResNet18Backbone(nn.Module):
         if weights is not None:
             self.model.load_state_dict(weights)
         
-    def forward(self, x):
+    def forward(self, x, step=None):
         """Forward method"""
-        return self.model.forward(x)
+        x = self.model.conv1.forward(x)
+        x = self.model.bn1(x)
+        x = self.model.relu(x)
+        x = self.model.maxpool(x)
+        if self.track_gradients and x.requires_grad:
+            x.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/Layer0', grad.abs().mean(), global_step=step))
+        
+        x = self.model.layer1(x)
+        if self.track_gradients and x.requires_grad:
+            x.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/Layer1', grad.abs().mean(), global_step=step))
+        
+        x = self.model.layer2(x)
+        if self.track_gradients and x.requires_grad:
+            x.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/Layer2', grad.abs().mean(), global_step=step))
+        
+        x = self.model.layer3(x)
+        if self.track_gradients and x.requires_grad:
+            x.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/Layer3', grad.abs().mean(), global_step=step))
+        
+        x = self.model.layer4(x)
+        if self.track_gradients and x.requires_grad:
+            x.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/Layer4', grad.abs().mean(), global_step=step))
+        
+        x = self.model.avgpool(x)
+        x = torch.flatten(x, 1)
+        if self.track_gradients and x.requires_grad:
+            x.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/AvgPool', grad.abs().mean(), global_step=step))
+        return x
     
     def set_train(self):
         """Set network in train mode"""

@@ -87,6 +87,8 @@ def get_parser():
                         help="Use this option to specify the directory from which model weights should be loaded")
     parser.add_argument("--pretrained", default=False, action='store_true',
                         help="Use this flag to start from network pretrained on ILSVRC")
+    parser.add_argument("--track-gradients", default=False, action='store_true',
+                        help="Use this flag to track gradients during training...")
     return vars(parser.parse_args())
 
 
@@ -157,7 +159,8 @@ def main():
     # print(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # print(utils.online_mean_and_sd(trgt_loader_test))
     
-    net = networks_mtl.ResNet18MTLWithBottleneck(num_classes=12)
+    net = networks_mtl.ResNet18MTLWithBottleneck(num_classes=12, tb_writer=tb_writer,
+                                                 track_gradients=exp_args['track_gradients'])
     mtl_model = models_mtl.JANMTLModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
                                        logger=logger, combined_batch=True)
     

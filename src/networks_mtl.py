@@ -9,9 +9,14 @@ class ResNet18MTLWithBottleneck(nn.Module):
     """Definition for MTL network with ResNet18"""
     
     def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, ssl_weights=None,
-                 classifier_weights=None, bottleneck_weights=None):
+                 classifier_weights=None, bottleneck_weights=None, tb_writer=None, track_gradients=False):
         super().__init__()
-        self.backbone = networks.ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
+        self.tb_writer = tb_writer
+        self.track_gradients = track_gradients
+        self.backbone = networks.ResNet18Backbone(pretrained=pretrained, weights=backbone_weights, tb_writer=tb_writer,
+                                                  track_gradients=self.track_gradients)
+        assert not self.track_gradients or self.tb_writer is not None, \
+            "track_gradients is True, but tb_writer not defined..."
         self.backbone_fc_size = self.backbone.fc_size
         self.num_classes = num_classes
         self.bottleneck_dim = 256
@@ -43,12 +48,27 @@ class ResNet18MTLWithBottleneck(nn.Module):
         else:
             self.ssl_head.apply(utils.weights_init)
     
-    def forward_all(self, x):
+    def forward_all(self, x, step=None):
         """Forward method"""
-        feats = self.backbone.forward(x)
+        feats = self.backbone.forward(x, step=step)
+        if self.track_gradients and feats.requires_grad:
+            feats.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/Feats', grad.abs().mean(),
+                                                                       global_step=step))
+        
         bottl_feats = self.bottleneck.forward(feats)
+        if self.track_gradients and bottl_feats.requires_grad:
+            bottl_feats.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/Bottl_Feats', grad.abs().mean(),
+                                                                             global_step=step))
+        
         classifier_logits = self.classifier_head.forward(bottl_feats)
+        if self.track_gradients and classifier_logits.requires_grad:
+            classifier_logits.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/Cl_logits', grad.abs().mean(),
+                                                                                   global_step=step))
+        
         ssl_logits = self.ssl_head.forward(feats)
+        if self.track_gradients and ssl_logits.requires_grad:
+            ssl_logits.register_hook(lambda grad: self.tb_writer.add_scalar('Grad/SSL_logits', grad.abs().mean(),
+                                                                            global_step=step))
         
         return bottl_feats, classifier_logits, ssl_logits
     

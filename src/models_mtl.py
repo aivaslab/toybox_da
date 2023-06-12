@@ -58,17 +58,18 @@ class JANMTLModel:
             trgt_idx, trgt_images = self.target_loader.get_next_batch()
             trgt_images = torch.cat(trgt_images, dim=0)
             trgt_images = trgt_images.cuda()
+            total_batches += 1
             
             if self.combined_batch:
                 comb_images = torch.concat([src_images, trgt_images], dim=0)
-                feats, cl_logits, ssl_logits = self.network.forward_all(comb_images)
+                feats, cl_logits, ssl_logits = self.network.forward_all(comb_images, step=total_batches)
                 src_size = src_images.shape[0]
                 src_feats, src_cl_logits, src_ssl_logits = feats[:src_size], cl_logits[:src_size], ssl_logits[:src_size]
                 trgt_feats, trgt_cl_logits, trgt_ssl_logits = \
                     feats[src_size:], cl_logits[src_size:], ssl_logits[src_size:]
             else:
-                src_feats, src_cl_logits, src_ssl_logits = self.network.forward_all(src_images)
-                trgt_feats, trgt_cl_logits, trgt_ssl_logits = self.network.forward_all(trgt_images)
+                src_feats, src_cl_logits, src_ssl_logits = self.network.forward_all(src_images, step=total_batches)
+                trgt_feats, trgt_cl_logits, trgt_ssl_logits = self.network.forward_all(trgt_images, step=total_batches)
             
             if ep == 1 and step == 1:
                 print(src_feats.shape, trgt_feats.shape, src_cl_logits.shape, trgt_cl_logits.shape,
@@ -89,7 +90,6 @@ class JANMTLModel:
             jmmd_loss_total += jmmd_loss.item()
             comb_loss_total += total_loss.item()
             num_batches += 1
-            total_batches += 1
             
             if 0 <= step - halfway < 1:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.4f}  CLR: {:.4f}  SLR: {:.4f}  CE: {:.4f}  "
