@@ -31,6 +31,15 @@ def create_logger(log_level_str: str, log_file_name: str):
     return logger
 
 
+def save_args(path, args):
+    """Save the experiment args in json file"""
+    import json
+    json_str = json.dumps(args)
+    out_file = open(path + "exp_args.json", "w")
+    out_file.write(json_str)
+    out_file.close()
+
+
 class ForeverDataLoader:
     """Class that returns the next batch of data"""
     
