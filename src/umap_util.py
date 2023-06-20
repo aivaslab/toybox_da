@@ -1,7 +1,8 @@
 """
 Module to get UMAP visualization
 """
-
+import json
+import csv
 import umap.umap_ as umap
 import matplotlib
 import matplotlib.pyplot as plt
@@ -72,32 +73,73 @@ def plot(embeddings, labels, markers, out_path):
     plt.close()
     
     
-def get_umap_from_activations(source_act, target_acts, out_path, fnames):
+def get_umap_from_activations(source_act, source_idxs, target_acts, target_idxs, out_path, fnames):
     """Get umap embeddings from the provided activations"""
+    print(source_idxs.shape)
     assert isinstance(target_acts, list)
     assert len(fnames) == len(target_acts) + 1
-    nbrs = [200]
-    min_ds = [0.2, 0.5]
+    umap_dict = {}
+    # nbrs = [10, 20, 50, 100, 200, 500]
+    # min_ds = [0.05, 0.1, 0.2, 0.5]
+
+    nbrs = [20, 50, 100, ]  # 200, 500]
+    min_ds = [0.05, 0.1, ]  # 0.2, 0.5]
+    metrics = ['cosine', ]  # 'euclidean']
+    umap_dict['n_neighbors'] = nbrs
+    umap_dict['min_dist'] = min_ds
+    umap_dict['metrics'] = metrics
+    umap_dict["prefix"] = "umap/umap_"
     for nbr in nbrs:
         for d in min_ds:
-            umap_out_path = out_path + "/umap/umap_{}_{}_{}/".format(nbr, d, 'cosine')
-            os.makedirs(umap_out_path, exist_ok=True)
-
-            reducer = umap.UMAP(n_neighbors=nbr, min_dist=d, metric='cosine', n_components=2)
-            reducer.fit(source_act)
-            src_embeddings = reducer.transform(source_act)
-            np.save(file=umap_out_path+fnames[0]+".npy", arr=src_embeddings)
-            for i, target_act in enumerate(target_acts):
-                embedding = reducer.transform(target_act)
-                np.save(file=umap_out_path+fnames[i+1]+".npy", arr=embedding)
+            for metric in metrics:
+                umap_out_path = out_path + "/umap_{}_{}_{}/".format(nbr, d, metric)
+                os.makedirs(umap_out_path, exist_ok=True)
+    
+                reducer = umap.UMAP(n_neighbors=nbr, min_dist=d, metric=metric, n_components=2, n_epochs=10)
+                
+                reducer.fit(source_act)
+                src_embeddings = reducer.transform(source_act)
+                csv_file_name = umap_out_path + fnames[0].split(".")[0] + ".csv"
+                print(csv_file_name)
+                csv_file = open(csv_file_name, "w")
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(["idx", "x", "y"])
+                for idx in range(len(src_embeddings)):
+                    csv_writer.writerow([source_idxs[idx], src_embeddings[idx][0], src_embeddings[idx][1]])
+                csv_file.close()
+                np.save(file=umap_out_path+fnames[0]+".npy", arr=src_embeddings)
+                
+                for i, target_act in enumerate(target_acts):
+                    embedding = reducer.transform(target_act)
+                    csv_file_name = umap_out_path + fnames[i+1].split(".")[0] + ".csv"
+                    print(csv_file_name)
+                    csv_file = open(csv_file_name, "w")
+                    csv_writer = csv.writer(csv_file)
+                    csv_writer.writerow(["idx", "x", "y"])
+                    for idx in range(len(embedding)):
+                        csv_writer.writerow([target_idxs[i][idx], embedding[idx][0], embedding[idx][1]])
+                    csv_file.close()
+                    np.save(file=umap_out_path+fnames[i+1]+".npy", arr=embedding)
+    
+    json_path = out_path + "umap.json"
+    json_file = open(json_path, "w")
+    json.dump(umap_dict, json_file)
+    json_file.close()
 
 
 if __name__ == "__main__":
-    load_path = "../temp/activations/"
+    dir_path = "../out/TB_SUP/exp_Apr_17_2023_23_15/"
+    load_path = dir_path + "activations/"
+    umap_path = dir_path + "umap/"
+    src_indices = np.load(load_path + "toybox_train_indices.npy")
     src_act = np.load(load_path + "toybox_train_activations.npy")
     trgt_acts = [np.load(load_path + "toybox_test_activations.npy"),
                  np.load(load_path + "in12_train_activations.npy"),
                  np.load(load_path + "in12_test_activations.npy")]
+    trgt_indices = [np.load(load_path + "toybox_test_indices.npy"),
+                    np.load(load_path + "in12_train_indices.npy"),
+                    np.load(load_path + "in12_test_indices.npy")]
     umap_fnames = ["tb_train", "tb_test", "in12_train", "in12_test"]
-    get_umap_from_activations(source_act=src_act, target_acts=trgt_acts, out_path=load_path, fnames=umap_fnames)
+    get_umap_from_activations(source_act=src_act, source_idxs=src_indices, target_acts=trgt_acts,
+                              target_idxs=trgt_indices, out_path=umap_path, fnames=umap_fnames)
     
