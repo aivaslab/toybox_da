@@ -15,6 +15,8 @@ TOYBOX_MEAN = (0.5199, 0.4374, 0.3499)
 TOYBOX_STD = (0.1775, 0.1894, 0.1623)
 TOYBOX_DATA_PATH = "../data/data_12/Toybox/"
 
+TOYBOX_UMAP_DATA_PATH = "../data/umap_data/"
+
 TOYBOX_CLASSES = ["airplane", "ball", "car", "cat", "cup", "duck", "giraffe", "helicopter", "horse", "mug", "spoon",
                   "truck"]
 
@@ -156,6 +158,77 @@ class DatasetIN12SSL(DatasetIN12):
     
     def __str__(self):
         return "IN12 SSL"
+
+
+class IN12SSLWithLabels(DatasetIN12):
+    """
+    This class can be used to load IN-12 data in PyTorch for SimCLR/BYOL-like methods
+    """
+    
+    def __init__(self, transform=None, fraction=1.0, hypertune=True, equal_div=True):
+        super().__init__(train=True, transform=transform, fraction=fraction, hypertune=hypertune,
+                         equal_div=equal_div)
+    
+    def __getitem__(self, index):
+        actual_index = self.selected_indices[index]
+        img = np.array(cv2.imdecode(self.images[actual_index], 3))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        label = int(self.labels[actual_index]["Class ID"])
+        if self.transform is not None:
+            imgs = [self.transform(img) for _ in range(2)]
+        else:
+            imgs = [img, img]
+        
+        return (index, actual_index), imgs, label
+    
+    def __str__(self):
+        return "IN12 SSL With Labels"
+
+
+class ToyboxDatasetUMAP(torchdata.Dataset):
+    """
+    Class for loading Toybox data for UMAP/t-SNE. Provides access to all images for specified split
+    Use case is for getting activations for all images
+    """
+    
+    def __init__(self, train=True, transform=None, hypertune=True):
+        self.data_path = TOYBOX_UMAP_DATA_PATH
+        self.train = train
+        self.transform = transform
+        self.hypertune = hypertune
+        self.label_key = 'Class ID'
+        
+        if self.train:
+            self.images_file = self.data_path + "toybox_data_umap_cropped_train.pickle"
+            self.labels_file = self.data_path + "toybox_data_umap_cropped_train.csv"
+        else:
+            self.images_file = self.data_path + "toybox_data_umap_cropped_test.pickle"
+            self.labels_file = self.data_path + "toybox_data_umap_cropped_test.csv"
+        
+        super().__init__()
+        
+        with open(self.images_file, "rb") as pickleFile:
+            self.data = pickle.load(pickleFile)
+        with open(self.labels_file, "r") as csvFile:
+            self.csvFile = list(csv.DictReader(csvFile))
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        img = cv2.imdecode(self.data[index], 3)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = np.array(img)
+        label = int(self.csvFile[index][self.label_key])
+        
+        if self.transform is not None:
+            imgs = self.transform(img)
+        else:
+            imgs = img
+        return (index, index), imgs, label
+    
+    def __str__(self):
+        return "ToyboxAll"
 
 
 class ToyboxDatasetAll(torchdata.Dataset):
