@@ -137,6 +137,30 @@ class DatasetIN12(torchdata.Dataset):
         return "IN12 Supervised"
 
 
+class DatasetIN12Offset(DatasetIN12):
+    """
+    This class loads IN-12 data with labels offset by 12, so labels are 12-23
+    """
+    
+    def __init__(self, train=True, transform=None, fraction=1.0, hypertune=True, equal_div=True):
+        super().__init__(train=train, transform=transform, fraction=fraction, hypertune=hypertune, equal_div=equal_div)
+    
+    def __getitem__(self, index):
+        if self.train:
+            item = self.selected_indices[index]
+        else:
+            item = index
+        im = np.array(cv2.imdecode(self.images[item], 3))
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        label = int(self.labels[item]["Class ID"])
+        if self.transform is not None:
+            im = self.transform(im)
+        return (index, item), im, label + 12
+    
+    def __str__(self):
+        return "IN12 Offset"
+
+
 class DatasetIN12SSL(DatasetIN12):
     """
     This class can be used to load IN-12 data in PyTorch for SimCLR/BYOL-like methods
