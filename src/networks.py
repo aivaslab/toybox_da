@@ -160,6 +160,60 @@ class ResNet18Sup24(nn.Module):
                 }
 
 
+class ResNet18SupWithDomain(nn.Module):
+    """Network for experiments of combined learning of class and domain"""
+    
+    def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, classifier_weights=None):
+        super().__init__()
+        self.backbone = ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
+        self.backbone_fc_size = self.backbone.fc_size
+        self.num_classes = num_classes
+        
+        self.classifier_head = nn.Linear(self.backbone_fc_size, self.num_classes)
+        
+        if classifier_weights is not None:
+            self.classifier_head.load_state_dict(classifier_weights)
+        else:
+            self.classifier_head.apply(utils.weights_init)
+            
+        self.domain_head = nn.Sequential(nn.Linear(self.backbone_fc_size, 1000), nn.ReLU(),
+                                         nn.Linear(1000, 1))
+        self.domain_head.apply(utils.weights_init)
+    
+    def forward(self, x):
+        """Forward method"""
+        feats = self.backbone.forward(x)
+        logits = self.classifier_head.forward(feats)
+        dom_logits = self.domain_head.forward(feats)
+        # print(dom_logits)
+        return logits, dom_logits.squeeze()
+    
+    def set_train(self):
+        """Set network in train mode"""
+        self.backbone.train()
+        self.classifier_head.train()
+        self.domain_head.train()
+    
+    def set_linear_eval(self):
+        """Set backbone in eval and cl in train mode"""
+        self.backbone.eval()
+        self.classifier_head.train()
+        self.domain_head.eval()
+    
+    def set_eval(self):
+        """Set network in eval mode"""
+        self.backbone.eval()
+        self.classifier_head.eval()
+        self.domain_head.eval()
+    
+    def get_params(self) -> dict:
+        """Return a dictionary of the parameters of the model"""
+        return {'backbone_params': self.backbone.parameters(),
+                'classifier_params': self.classifier_head.parameters(),
+                'domain_head_params': self.domain_head.parameters()
+                }
+
+
 class ResNet18SSL(nn.Module):
     """Definition for SSL network with ResNet18"""
     
