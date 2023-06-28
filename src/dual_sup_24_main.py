@@ -194,7 +194,7 @@ def main():
             get_train_test_acc(model=model,
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,
                                trgt_train_loader=trgt_loader_train, trgt_test_loader=trgt_loader_test,
-                               writer=tb_writer, step=num_epochs * steps, logger=logger)
+                               writer=tb_writer, step=ep * steps, logger=logger)
     
     src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc = get_train_test_acc(model=model,
                                                                           src_train_loader=src_loader_train,
