@@ -119,7 +119,7 @@ def umap_func(act_fnames, idx_fnames, out_path, fnames, nbr, d, metric, train_id
         csv_file.close()
     
     
-def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_idxs):
+def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_idxs, pref):
     """Get umap embeddings from the provided activations"""
     assert isinstance(act_fnames, list)
     assert len(fnames) == len(act_fnames)
@@ -133,7 +133,7 @@ def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_id
     umap_dict['n_neighbors'] = nbrs
     umap_dict['min_dist'] = min_ds
     umap_dict['metrics'] = metrics
-    umap_dict["prefix"] = "umap/umap_"
+    umap_dict["prefix"] = pref
     
     num_procs = 2
     umap_settings = []
@@ -198,5 +198,6 @@ if __name__ == "__main__":
     mp.set_start_method('forkserver')
     umap_fnames = ["tb_train", "tb_test", "in12_train", "in12_test"]
     get_umap_from_activations(act_fnames=activation_fnames, idx_fnames=index_fnames, out_path=umap_path,
-                              fnames=umap_fnames, train_idxs=train_indices_dict[args['train_type']])
+                              fnames=umap_fnames, train_idxs=train_indices_dict[args['train_type']],
+                              pref="umap_"+args['train_type']+"/umap_")
     
