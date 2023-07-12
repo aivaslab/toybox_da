@@ -124,12 +124,12 @@ def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_id
     assert isinstance(act_fnames, list)
     assert len(fnames) == len(act_fnames)
     umap_dict = {}
-    # nbrs = [10, 20, 50, 100, 200, 500]
-    # min_ds = [0.01, 0.05, 0.1, 0.2]
-    # metrics = ['cosine', 'euclidean']
-    nbrs = [500]
-    min_ds = [0.05]
-    metrics = ['cosine']
+    nbrs = [10, 20, 50, 100, 200]
+    min_ds = [0.01, 0.05, 0.1, 0.2]
+    metrics = ['cosine', 'euclidean']
+    # nbrs = [500]
+    # min_ds = [0.05]
+    # metrics = ['cosine']
     umap_dict['n_neighbors'] = nbrs
     umap_dict['min_dist'] = min_ds
     umap_dict['metrics'] = metrics
@@ -168,7 +168,7 @@ def get_args():
     """Parser with arguments"""
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--dir-path", "-d", type=str, required=True, help="Path where model is stored.")
-    parser.add_argument("--train-type", "-t", type=str, default="all",
+    parser.add_argument("--train-type", "-t", type=str, default="all_data",
                         choices=['toybox_train', 'toybox_only', 'in12_train', "in12_only", "train_only", "all_data"])
     return vars(parser.parse_args())
 
