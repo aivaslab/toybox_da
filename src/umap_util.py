@@ -1,6 +1,7 @@
 """
 Module to get UMAP visualization
 """
+import argparse
 import json
 import csv
 import umap.umap_ as umap
@@ -10,6 +11,7 @@ import matplotlib.cm as cm
 import matplotlib.colors as colors
 import numpy as np
 import os
+import multiprocessing as mp
 
 
 color_maps = matplotlib.colormaps.get_cmap('tab20b')
@@ -73,73 +75,128 @@ def plot(embeddings, labels, markers, out_path):
     plt.close()
     
     
-def get_umap_from_activations(source_act, source_idxs, target_acts, target_idxs, out_path, fnames):
+def umap_func(act_fnames, idx_fnames, out_path, fnames, nbr, d, metric, train_idxs):
+    """umap_func for multiprocessing"""
+    import os
+    import time
+    assert len(act_fnames) == len(train_idxs)
+    start_time = time.time()
+    umap_out_path = out_path + "/umap_{}_{}_{}/".format(nbr, d, metric)
+    os.makedirs(umap_out_path, exist_ok=True)
+    
+    activations = []
+    
+    for idx in range(len(train_idxs)):
+        if train_idxs[idx] == 1:
+            activations.append(np.load(act_fnames[idx]))
+    
+    train_activations = np.concatenate(activations, axis=0)
+    # print(type(train_activations), type(activations))
+
+    reducer = umap.UMAP(n_neighbors=nbr, min_dist=d, metric=metric, n_components=2, init="random")
+    reducer.fit(train_activations)
+    train_embeddings = reducer.embedding_
+    train_counted = 0
+    for i in range(len(train_idxs)):
+        indices = np.load(idx_fnames[i])
+        len_embedding = len(indices)
+        if train_idxs[i] == 1:
+            embedding = train_embeddings[train_counted:train_counted+len_embedding]
+            train_counted += len_embedding
+        else:
+            act = np.load(act_fnames[i])
+            embedding = reducer.transform(act)
+        
+        csv_file_name = umap_out_path + fnames[i].split(".")[0] + ".csv"
+        print(csv_file_name, time.time() - start_time, os.getpid(), len(embedding), len(indices))
+        start_time = time.time()
+        
+        csv_file = open(csv_file_name, "w")
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(["idx", "x", "y"])
+        for idx in range(len_embedding):
+            csv_writer.writerow([indices[idx], embedding[idx][0], embedding[idx][1]])
+        csv_file.close()
+    
+    
+def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_idxs):
     """Get umap embeddings from the provided activations"""
-    print(source_idxs.shape)
-    assert isinstance(target_acts, list)
-    assert len(fnames) == len(target_acts) + 1
+    assert isinstance(act_fnames, list)
+    assert len(fnames) == len(act_fnames)
     umap_dict = {}
     # nbrs = [10, 20, 50, 100, 200, 500]
-    # min_ds = [0.05, 0.1, 0.2, 0.5]
-
-    nbrs = [20, 50, 100, ]  # 200, 500]
-    min_ds = [0.05, 0.1, ]  # 0.2, 0.5]
-    metrics = ['cosine', ]  # 'euclidean']
+    # min_ds = [0.01, 0.05, 0.1, 0.2]
+    # metrics = ['cosine', 'euclidean']
+    nbrs = [500]
+    min_ds = [0.05]
+    metrics = ['cosine']
     umap_dict['n_neighbors'] = nbrs
     umap_dict['min_dist'] = min_ds
     umap_dict['metrics'] = metrics
     umap_dict["prefix"] = "umap/umap_"
+    
+    num_procs = 2
+    umap_settings = []
     for nbr in nbrs:
         for d in min_ds:
             for metric in metrics:
-                umap_out_path = out_path + "/umap_{}_{}_{}/".format(nbr, d, metric)
-                os.makedirs(umap_out_path, exist_ok=True)
+                umap_settings.append((nbr, d, metric))
     
-                reducer = umap.UMAP(n_neighbors=nbr, min_dist=d, metric=metric, n_components=2, n_epochs=10)
-                
-                reducer.fit(source_act)
-                src_embeddings = reducer.transform(source_act)
-                csv_file_name = umap_out_path + fnames[0].split(".")[0] + ".csv"
-                print(csv_file_name)
-                csv_file = open(csv_file_name, "w")
-                csv_writer = csv.writer(csv_file)
-                csv_writer.writerow(["idx", "x", "y"])
-                for idx in range(len(src_embeddings)):
-                    csv_writer.writerow([source_idxs[idx], src_embeddings[idx][0], src_embeddings[idx][1]])
-                csv_file.close()
-                np.save(file=umap_out_path+fnames[0]+".npy", arr=src_embeddings)
-                
-                for i, target_act in enumerate(target_acts):
-                    embedding = reducer.transform(target_act)
-                    csv_file_name = umap_out_path + fnames[i+1].split(".")[0] + ".csv"
-                    print(csv_file_name)
-                    csv_file = open(csv_file_name, "w")
-                    csv_writer = csv.writer(csv_file)
-                    csv_writer.writerow(["idx", "x", "y"])
-                    for idx in range(len(embedding)):
-                        csv_writer.writerow([target_idxs[i][idx], embedding[idx][0], embedding[idx][1]])
-                    csv_file.close()
-                    np.save(file=umap_out_path+fnames[i+1]+".npy", arr=embedding)
-    
+    idx = 0
+    while idx < len(umap_settings):
+        curr_procs = []
+        while idx < len(umap_settings) and len(curr_procs) < num_procs:
+            nbr, d, metric = umap_settings[idx]
+            new_proc = mp.Process(target=umap_func, args=(act_fnames, idx_fnames, out_path, fnames, nbr, d, metric,
+                                                          train_idxs))
+            curr_procs.append(new_proc)
+            idx += 1
+            
+        for proc in curr_procs:
+            proc.start()
+            
+        for proc in curr_procs:
+            proc.join()
+            
     json_path = out_path + "umap.json"
     json_file = open(json_path, "w")
     json.dump(umap_dict, json_file)
     json_file.close()
 
 
+def get_args():
+    """Parser with arguments"""
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--dir-path", "-d", type=str, required=True, help="Path where model is stored.")
+    parser.add_argument("--train-type", "-t", type=str, default="all",
+                        choices=['toybox_train', 'toybox_only', 'in12_train', "in12_only", "train_only", "all_data"])
+    return vars(parser.parse_args())
+
+
 if __name__ == "__main__":
-    dir_path = "../out/TB_SUP/exp_Apr_17_2023_23_15/"
+    args = get_args()
+    dir_path = args['dir_path']
     load_path = dir_path + "activations/"
-    umap_path = dir_path + "umap/"
-    src_indices = np.load(load_path + "toybox_train_indices.npy")
-    src_act = np.load(load_path + "toybox_train_activations.npy")
-    trgt_acts = [np.load(load_path + "toybox_test_activations.npy"),
-                 np.load(load_path + "in12_train_activations.npy"),
-                 np.load(load_path + "in12_test_activations.npy")]
-    trgt_indices = [np.load(load_path + "toybox_test_indices.npy"),
-                    np.load(load_path + "in12_train_indices.npy"),
-                    np.load(load_path + "in12_test_indices.npy")]
+    umap_path = dir_path + "umap_" + args['train_type'] + "/"
+    train_indices_dict = {
+        'toybox_train':   (1, 0, 0, 0),
+        'toybox_only':    (1, 1, 0, 0),
+        'in12_train':     (0, 0, 1, 0),
+        'in12_only':      (0, 0, 1, 1),
+        'train_only':     (1, 0, 1, 0),
+        'all_data':       (1, 1, 1, 1)
+    }
+    activation_fnames = [load_path + "toybox_train_activations.npy", load_path + "toybox_test_activations.npy",
+                         load_path + "in12_train_activations.npy", load_path + "in12_test_activations.npy"]
+    
+    index_fnames = [load_path + "toybox_train_indices.npy", load_path + "toybox_test_indices.npy",
+                    load_path + "in12_train_indices.npy", load_path + "in12_test_indices.npy"]
+    for fname in activation_fnames:
+        assert os.path.isfile(fname)
+    for fname in index_fnames:
+        assert os.path.isfile(fname)
+    mp.set_start_method('forkserver')
     umap_fnames = ["tb_train", "tb_test", "in12_train", "in12_test"]
-    get_umap_from_activations(source_act=src_act, source_idxs=src_indices, target_acts=trgt_acts,
-                              target_idxs=trgt_indices, out_path=umap_path, fnames=umap_fnames)
+    get_umap_from_activations(act_fnames=activation_fnames, idx_fnames=index_fnames, out_path=umap_path,
+                              fnames=umap_fnames, train_idxs=train_indices_dict[args['train_type']])
     

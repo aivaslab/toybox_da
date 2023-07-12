@@ -1,6 +1,7 @@
 """Use provided model to get the activations from provided dataset"""
 import numpy as np
 import os
+import argparse
 
 import torch
 import torch.utils.data as torchdata
@@ -76,7 +77,16 @@ def get_activations_sup(model_path, out_path):
     np.save(file=out_path+"in12_test_activations.npy", arr=activations)
 
 
+def get_args():
+    """Parser with arguments"""
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--dir-path", "-d", type=str, required=True, help="Path where model is stored.")
+    return vars(parser.parse_args())
+
+
 if __name__ == "__main__":
-    get_activations_sup(model_path="../out/TB_SUP/exp_Apr_17_2023_23_15/final_model.pt",
-                        out_path="../out/TB_SUP/exp_Apr_17_2023_23_15/activations/")
+    args = get_args()
+    dir_name = args['dir_path']
+    assert os.path.isdir(dir_name)
+    get_activations_sup(model_path=dir_name+"final_model.pt", out_path=dir_name+"activations/")
     
