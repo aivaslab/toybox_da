@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 import torch.utils.tensorboard as tb
 
 import datasets
-import models
+import models_da
 import networks
 import utils
 
@@ -168,8 +168,8 @@ def main():
     else:
         net = networks.ResNet18DualSupJAN(num_classes=12, pretrained=exp_args['pretrained'])
     
-    model = models.DualSupWithJANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-                                       logger=logger, combined_batch=combined_batch)
+    model = models_da.DualSupWithJANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
+                                          logger=logger, combined_batch=combined_batch)
     
     bb_lr_wt = 0.1 if (exp_args['pretrained'] or
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
