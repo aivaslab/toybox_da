@@ -239,6 +239,7 @@ class SupContrModel:
         self.network = network
         self.loader = utils.ForeverDataLoader(loader)
         self.logger = logger
+        self.criterion = utils.SupConLoss(temperature=0.1)
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
@@ -252,12 +253,18 @@ class SupContrModel:
             optimizer.zero_grad()
             idx, images, labels = self.loader.get_next_batch()
             images = torch.cat(images, dim=0)
-            labels = torch.cat([labels, labels], dim=0)
+            bsize = labels.shape[0]
+            # labels = torch.cat([labels, labels], dim=0)
             images = images.cuda()
             labels = labels.cuda()
             # with torch.autograd.detect_anomaly():
             feats = self.network.forward(images)
-            loss = utils.sup_con_loss(features=feats, temp=0.1, labels=labels)
+            feats_norm = torch.nn.functional.normalize(feats)
+            f1, f2 = torch.split(feats_norm, [bsize, bsize], dim=0)
+            
+            features_split = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
+            # print(features_split.shape, labels.shape)
+            loss = self.criterion(features=features_split, labels=labels)
             # print(loss, feats, labels)
             
             loss.backward()
