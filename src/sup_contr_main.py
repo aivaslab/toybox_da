@@ -82,6 +82,13 @@ def main():
         net = networks.ResNet18SSL(backbone_weights=bb_wts, ssl_weights=ssl_wts)
     else:
         net = networks.ResNet18SSL()
+
+    save_dict = {
+        'type': net.__class__.__name__,
+        'backbone': net.backbone.model.state_dict(),
+        'ssl_head': net.ssl_head.state_dict()
+    }
+    torch.save(save_dict, tb_path + "initial_model.pt")
     ssl_model = models.SupContrModel(network=net, loader=loader_train, logger=logger)
     
     optimizer = torch.optim.Adam(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
