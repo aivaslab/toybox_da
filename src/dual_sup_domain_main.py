@@ -70,6 +70,8 @@ def get_parser():
     parser.add_argument("-wd", "--wd", default=1e-5, type=float, help="Weight decay for optimizer")
     parser.add_argument("--instances", default=-1, type=int, help="Set number of toybox instances to train on")
     parser.add_argument("--images", default=1000, type=int, help="Set number of images per class to train on")
+    parser.add_argument("--target-frac", "-tf", default=1.0, type=float,
+                        help="Set fraction of training images to be used for target dataset")
     parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
     parser.add_argument("--log", choices=["debug", "info", "warning", "error", "critical"],
                         default="info", type=str)
@@ -101,6 +103,7 @@ def main():
     hypertune = not exp_args['final']
     num_instances = exp_args['instances']
     num_images_per_class = exp_args['images']
+    target_frac = exp_args['target_frac']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -156,7 +159,7 @@ def main():
                                                transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD),
                                                transforms.RandomErasing(p=0.5)
                                                ])
-    trgt_data_train = datasets.DatasetIN12(train=True, transform=trgt_transform_train, fraction=1.0,
+    trgt_data_train = datasets.DatasetIN12(train=True, transform=trgt_transform_train, fraction=target_frac,
                                            hypertune=hypertune)
     trgt_loader_train = torchdata.DataLoader(trgt_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
                                              drop_last=True)
