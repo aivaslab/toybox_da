@@ -122,7 +122,7 @@ def main():
                                             hypertune=hypertune, num_instances=num_instances,
                                             num_images_per_class=num_images_per_class,
                                             )
-    logger.debug(f"Source dataset: {src_data_train}  Size: {len(src_data_train)}")
+    logger.info(f"Source dataset: {src_data_train}  Size: {len(src_data_train)}")
     src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
                                             drop_last=True)
     
@@ -150,6 +150,7 @@ def main():
                                            hypertune=hypertune)
     trgt_loader_train = torchdata.DataLoader(trgt_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
                                              drop_last=True)
+    logger.info(f"Target dataset: {trgt_data_train}  Size: {len(trgt_data_train)}")
     
     trgt_transform_test = transforms.Compose([transforms.ToPILImage(),
                                               transforms.Resize((224, 224)),
@@ -188,10 +189,14 @@ def main():
                        src_train_loader=src_loader_train, src_test_loader=src_loader_test,
                        trgt_train_loader=trgt_loader_train, trgt_test_loader=trgt_loader_test,
                        writer=tb_writer, step=0, logger=logger)
+    model.calc_val_loss(ep=0, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
+                        loader_names=['tb_test', 'in12_test'])
     
     for ep in range(1, num_epochs + 1):
         model.train(optimizer=optimizer, scheduler=lr_scheduler, steps=steps,
                     ep=ep, ep_total=num_epochs, writer=tb_writer)
+        model.calc_val_loss(ep=ep, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
+                            loader_names=['tb_test', 'in12_test'])
         if ep % 20 == 0 and ep != num_epochs:
             get_train_test_acc(model=model,
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,

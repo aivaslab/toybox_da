@@ -459,6 +459,31 @@ class DualSupModel:
                                              src_ce_loss_total / num_batches, trgt_ce_loss_total / num_batches,
                                              time.time() - start_time))
     
+    def calc_val_loss(self, loaders, loader_names, ep, steps, writer: tb.SummaryWriter):
+        """Calculate loss on provided dataloader"""
+        self.network.set_eval()
+        criterion = nn.CrossEntropyLoss()
+        losses = []
+        for idx, loader in enumerate(loaders):
+            num_batches = 0
+            total_loss = 0.0
+            for _, (idxs, images, labels) in enumerate(loader):
+                num_batches += 1
+                images, labels = images.cuda(), labels.cuda()
+                with torch.no_grad():
+                    logits = self.network.forward(images)
+                loss = criterion(logits, labels)
+                total_loss += loss.item()
+            losses.append(total_loss/num_batches)
+        self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
+                                                                                     loader_names[1], losses[1]))
+        writer.add_scalars(main_tag="val_loss",
+                           tag_scalar_dict={
+                               loader_names[0]: losses[0],
+                               loader_names[1]: losses[1]
+                           },
+                           global_step=ep*steps)
+    
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
         n_total = 0
@@ -566,7 +591,32 @@ class DualSupModelWithDomain:
                                              src_ce_loss_total / num_batches, trgt_ce_loss_total / num_batches,
                                              dom_loss_total / num_batches,
                                              time.time() - start_time))
-    
+
+    def calc_val_loss(self, loaders, loader_names, ep, steps, writer: tb.SummaryWriter):
+        """Calculate loss on provided dataloader"""
+        self.network.set_eval()
+        criterion = nn.CrossEntropyLoss()
+        losses = []
+        for idx, loader in enumerate(loaders):
+            num_batches = 0
+            total_loss = 0.0
+            for _, (idxs, images, labels) in enumerate(loader):
+                num_batches += 1
+                images, labels = images.cuda(), labels.cuda()
+                with torch.no_grad():
+                    logits, _ = self.network.forward(images)
+                loss = criterion(logits, labels)
+                total_loss += loss.item()
+            losses.append(total_loss / num_batches)
+        self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
+                                                                                     loader_names[1], losses[1]))
+        writer.add_scalars(main_tag="val_loss",
+                           tag_scalar_dict={
+                               loader_names[0]: losses[0],
+                               loader_names[1]: losses[1]
+                           },
+                           global_step=ep * steps)
+
     def eval(self, loader, source):
         """Evaluate the model on the provided dataloader"""
         n_total = 0
@@ -708,7 +758,32 @@ class DualSupWithCCMMDModel:
                             src_ce_loss_total / num_batches, trgt_ce_loss_total / num_batches,
                             ccmmd_loss_total / num_batches, comb_loss_total / num_batches,
                             time.time() - start_time))
-    
+
+    def calc_val_loss(self, loaders, loader_names, ep, steps, writer: tb.SummaryWriter):
+        """Calculate loss on provided dataloader"""
+        self.network.set_eval()
+        criterion = nn.CrossEntropyLoss()
+        losses = []
+        for idx, loader in enumerate(loaders):
+            num_batches = 0
+            total_loss = 0.0
+            for _, (idxs, images, labels) in enumerate(loader):
+                num_batches += 1
+                images, labels = images.cuda(), labels.cuda()
+                with torch.no_grad():
+                    _, logits = self.network.forward(images)
+                loss = criterion(logits, labels)
+                total_loss += loss.item()
+            losses.append(total_loss / num_batches)
+        self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
+                                                                                     loader_names[1], losses[1]))
+        writer.add_scalars(main_tag="val_loss",
+                           tag_scalar_dict={
+                               loader_names[0]: losses[0],
+                               loader_names[1]: losses[1]
+                           },
+                           global_step=ep * steps)
+
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
         n_total = 0
