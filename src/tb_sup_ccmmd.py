@@ -1,4 +1,4 @@
-"""Dual Supervised experiments with CCMMD"""
+"""TB Supervised experiments with CCMMD"""
 import argparse
 import numpy as np
 import os
@@ -14,8 +14,8 @@ import models
 import networks
 import utils
 
-TEMP_DIR = "../temp/DUAL_SUP_CCMMD/"
-OUT_DIR = "../out/DUAL_SUP_CCMMD/"
+TEMP_DIR = "../temp/TB_SUP_CCMMD/"
+OUT_DIR = "../out/TB_SUP_CCMMD/"
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -160,7 +160,7 @@ def main():
                                               transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
     trgt_data_test = datasets.DatasetIN12(train=False, transform=trgt_transform_test, fraction=1.0, hypertune=hypertune)
     trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
-
+    
     logger.info(f"Target dataset: {trgt_data_train}  Size: {len(trgt_data_train)}")
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
@@ -175,8 +175,8 @@ def main():
     else:
         net = networks.ResNet18DualSupJAN(num_classes=12, pretrained=exp_args['pretrained'])
     
-    model = models.DualSupWithCCMMDModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-                                         logger=logger, combined_batch=combined_batch, lmbda=lmbda)
+    model = models.TBSupWithCCMMDModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
+                                       logger=logger, combined_batch=combined_batch, lmbda=lmbda)
     
     bb_lr_wt = 0.1 if (exp_args['pretrained'] or
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
