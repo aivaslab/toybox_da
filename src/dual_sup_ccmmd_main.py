@@ -183,7 +183,7 @@ def main():
         else 1.0
     
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=bb_lr_wt * exp_args['lr'], weight_decay=exp_args['wd'],
-                                nesterov=True)
+                                momentum=0.9)
     optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': exp_args['lr']})
     
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer,

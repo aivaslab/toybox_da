@@ -87,6 +87,8 @@ def _get_index_matrix(src_labels: list, trgt_labels: list) -> torch.Tensor:
                     -1. / float(src_labels_ctr[src_labels[i]] * trgt_labels_ctr[trgt_labels[j]])
                 index_matrix[src_labels_sz + i][j] = \
                     -1. / float(src_labels_ctr[src_labels[i]] * trgt_labels_ctr[trgt_labels[j]])
+                
+    index_matrix = torch.nan_to_num(index_matrix, nan=0.0)
             
     # for i in range(batch_size):
     #     for j in range(batch_size):
