@@ -7,6 +7,91 @@ import torchvision.models as models
 import utils
 
 
+class ResNet18BackboneWithActivations(nn.Module):
+    """ResNet18Backbone without the fully connected layer and additionally returns activations at the end of each
+    residual layer"""
+
+    MAX_POOLS = {
+        'conv1': nn.MaxPool2d(kernel_size=14, stride=14, padding=0),
+        'layer1': nn.MaxPool2d(kernel_size=7, stride=7, padding=0),
+        'layer2': nn.MaxPool2d(kernel_size=5, stride=5, padding=2),
+        'layer3': nn.MaxPool2d(kernel_size=4, stride=4, padding=1),
+        'layer4': nn.MaxPool2d(kernel_size=3, stride=3, padding=1),
+        'avgpool': nn.Identity()
+    }
+
+    FC_SIZES = {
+        'conv1': 4096,
+        'layer1': 4096,
+        'layer2': 4608,
+        'layer3': 4096,
+        'layer4': 4608,
+        'avgpool': 512
+    }
+    
+    def __init__(self, pretrained=False, weights=None):
+        super().__init__()
+        assert not pretrained or weights is None, \
+            "Resnet18 init asking for both ILSVRC init and pretrained_weights provided. Choose one..."
+        self.pretrained = pretrained
+        if self.pretrained:
+            self.model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+        else:
+            self.model = models.resnet18(weights=None)
+            self.model.apply(utils.weights_init)
+        self.fc_size = self.model.fc.in_features
+        self.model.fc = nn.Identity()
+        
+        if weights is not None:
+            self.model.load_state_dict(weights)
+    
+    def forward(self, x):
+        """Forward method"""
+        x = self.model.conv1.forward(x)
+        x = self.model.bn1(x)
+        
+        layer0_out = self.model.relu(x)
+        layer0_out_reduced = self.MAX_POOLS['conv1'](layer0_out)
+        layer0_out_reduced = layer0_out_reduced.view(layer0_out_reduced.size(0), -1)
+
+        layer0_out = self.model.maxpool(layer0_out)
+        layer1_out = self.model.layer1(layer0_out)
+        layer1_out_reduced = self.MAX_POOLS['layer1'](layer1_out)
+        layer1_out_reduced = layer1_out_reduced.view(layer1_out_reduced.size(0), -1)
+        
+        layer2_out = self.model.layer2(layer1_out)
+        layer2_out_reduced = self.MAX_POOLS['layer2'](layer2_out)
+        layer2_out_reduced = layer2_out_reduced.view(layer2_out_reduced.size(0), -1)
+        
+        layer3_out = self.model.layer3(layer2_out)
+        layer3_out_reduced = self.MAX_POOLS['layer3'](layer3_out)
+        layer3_out_reduced = layer3_out_reduced.view(layer3_out_reduced.size(0), -1)
+        
+        layer4_out = self.model.layer4(layer3_out)
+        layer4_out_reduced = self.MAX_POOLS['layer4'](layer4_out)
+        layer4_out_reduced = layer4_out_reduced.view(layer4_out_reduced.size(0), -1)
+        
+        avgpool_out = self.model.avgpool(layer4_out)
+        avgpool_out = torch.flatten(avgpool_out, 1)
+        avgpool_out_reduced = self.MAX_POOLS['avgpool'](avgpool_out)
+        return layer0_out_reduced, \
+            layer1_out_reduced, layer2_out_reduced, layer3_out_reduced, layer4_out_reduced, \
+            avgpool_out_reduced
+    
+    def set_train(self):
+        """Set network in train mode"""
+        self.model.train()
+    
+    def set_eval(self):
+        """Set network in eval mode"""
+        self.model.eval()
+    
+    def get_params(self) -> dict:
+        """Return the parameters of the module"""
+        return {'backbone_params': self.model.parameters()
+                }
+
+
 class ResNet18Backbone(nn.Module):
     """ResNet18Backbone without the fully connected layer"""
     def __init__(self, pretrained=False, weights=None, tb_writer=None, track_gradients=False):
