@@ -179,20 +179,30 @@ def main():
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))
                        ) else 1.0
     
-    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=bb_lr_wt * exp_args['lr'], weight_decay=exp_args['wd'])
+    optimizer = torch.optim.Adam(net.backbone.parameters(), lr=bb_lr_wt * exp_args['lr'], weight_decay=exp_args['wd'])
     optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': exp_args['lr']})
-    
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer,
-                                                     lambda x: (1. + 10 * float(x / (num_epochs * steps))) ** (-0.75))
+
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
+                                                         total_iters=2 * steps)
+    decay_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=(num_epochs - 2) * steps)
+    combined_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer=optimizer,
+                                                               schedulers=[warmup_scheduler, decay_scheduler],
+                                                               milestones=[2 * steps + 1])
     
     get_train_test_acc(model=model,
                        src_train_loader=src_loader_train, src_test_loader=src_loader_test,
                        trgt_train_loader=trgt_loader_train, trgt_test_loader=trgt_loader_test,
                        writer=tb_writer, step=0, logger=logger)
+    model.calc_val_loss(ep=0, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
+                        loader_names=['tb_test', 'in12_test'])
     
     for ep in range(1, num_epochs + 1):
-        model.train(optimizer=optimizer, scheduler=lr_scheduler, steps=steps,
+        model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                     ep=ep, ep_total=num_epochs, writer=tb_writer)
+        
+        if ep % 5 == 0:
+            model.calc_val_loss(ep=ep, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
+                                loader_names=['tb_test', 'in12_test'])
         if ep % 20 == 0 and ep != num_epochs:
             get_train_test_acc(model=model,
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,
