@@ -22,7 +22,7 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_train_loader, trgt_test_loader,
                        writer: tb.SummaryWriter, step: int,
-                       logger):
+                       logger, no_save):
     """Get train and test accuracy"""
     src_tr_acc = model.eval(loader=src_train_loader)
     src_te_acc = model.eval(loader=src_test_loader)
@@ -30,14 +30,15 @@ def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_train_load
     trgt_te_acc = model.eval(loader=trgt_test_loader)
     logger.info("Source Train acc: {:.2f}   Source Test acc: {:.2f}   Target Train Acc:{:.2f}   Target Test Acc:{:.2f}"
                 .format(src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc))
-    writer.add_scalars(main_tag="Accuracies",
-                       tag_scalar_dict={
-                           'tb_train': src_tr_acc,
-                           'tb_test': src_te_acc,
-                           'in12_train': trgt_tr_acc,
-                           'in12_test': trgt_te_acc
-                       },
-                       global_step=step)
+    if not no_save:
+        writer.add_scalars(main_tag="Accuracies",
+                           tag_scalar_dict={
+                               'tb_train': src_tr_acc,
+                               'tb_test': src_te_acc,
+                               'in12_train': trgt_tr_acc,
+                               'in12_test': trgt_te_acc
+                           },
+                           global_step=step)
     return src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc
 
 
@@ -65,6 +66,7 @@ def get_parser():
                         help="Use this flag to start from pretrained network")
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--no-save", default=False, action='store_true', help="Set this flag to not save anything")
     return vars(parser.parse_args())
 
 
@@ -91,11 +93,12 @@ def main():
     num_images_per_class = exp_args['images']
     combined_batch = exp_args['combined_batch']
     target_frac = exp_args['target_frac']
+    no_save = exp_args['no_save']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
-    tb_writer = tb.SummaryWriter(log_dir=tb_path)
-    logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt")
+    tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
+    logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
 
     prob = 0.2
     color_transforms = [transforms.RandomApply([transforms.ColorJitter(brightness=0.2)], p=prob),
@@ -172,7 +175,7 @@ def main():
         net = networks.ResNet18DualSupJAN(num_classes=12, pretrained=exp_args['pretrained'])
     
     model = models_da.DualSupWithJANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-                                          logger=logger, combined_batch=combined_batch)
+                                          logger=logger, combined_batch=combined_batch, no_save=no_save)
     
     bb_lr_wt = 0.1 if (exp_args['pretrained'] or
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
@@ -191,7 +194,7 @@ def main():
     get_train_test_acc(model=model, src_train_loader=src_loader_train,
                        src_test_loader=src_loader_test, trgt_train_loader=trgt_loader_train,
                        trgt_test_loader=trgt_loader_test,
-                       writer=tb_writer, step=0, logger=logger)
+                       writer=tb_writer, step=0, logger=logger, no_save=no_save)
     model.calc_val_loss(ep=0, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
                         loader_names=['tb_test', 'in12_test'])
     for ep in range(1, num_epochs + 1):
@@ -204,7 +207,7 @@ def main():
             get_train_test_acc(model=model,
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,
                                trgt_train_loader=trgt_loader_train, trgt_test_loader=trgt_loader_test,
-                               writer=tb_writer, step=ep * steps, logger=logger)
+                               writer=tb_writer, step=ep * steps, logger=logger, no_save=no_save)
     
     src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc = get_train_test_acc(model=model,
                                                                           src_train_loader=src_loader_train,
@@ -212,24 +215,25 @@ def main():
                                                                           trgt_train_loader=trgt_loader_train,
                                                                           trgt_test_loader=trgt_loader_test,
                                                                           writer=tb_writer, step=num_epochs * steps,
-                                                                          logger=logger)
+                                                                          logger=logger, no_save=no_save)
     
-    tb_writer.close()
-    save_dict = {
-        'type': net.__class__.__name__,
-        'backbone': net.backbone.model.state_dict(),
-        'classifier': net.classifier_head.state_dict(),
-    }
-    torch.save(save_dict, tb_path + "final_model.pt")
-    
-    exp_args['tb_train'] = src_tr_acc
-    exp_args['tb_test'] = src_te_acc
-    exp_args['in12_train'] = trgt_tr_acc
-    exp_args['in12_test'] = trgt_te_acc
-    exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")
-    exp_args['train_transform'] = str(src_transform_train)
-    save_args(path=tb_path, args=exp_args)
-    logger.info("Experimental details and results saved to {}".format(tb_path))
+    if not no_save:
+        tb_writer.close()
+        save_dict = {
+            'type': net.__class__.__name__,
+            'backbone': net.backbone.model.state_dict(),
+            'classifier': net.classifier_head.state_dict(),
+        }
+        torch.save(save_dict, tb_path + "final_model.pt")
+        
+        exp_args['tb_train'] = src_tr_acc
+        exp_args['tb_test'] = src_te_acc
+        exp_args['in12_train'] = trgt_tr_acc
+        exp_args['in12_test'] = trgt_te_acc
+        exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")
+        exp_args['train_transform'] = str(src_transform_train)
+        save_args(path=tb_path, args=exp_args)
+        logger.info("Experimental details and results saved to {}".format(tb_path))
 
 
 if __name__ == "__main__":

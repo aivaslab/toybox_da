@@ -146,7 +146,7 @@ class JANModel:
 class DualSupWithJANModel:
     """Module implementing the Dual Supervised Model with Jan loss"""
     
-    def __init__(self, network, source_loader, target_loader, combined_batch, logger):
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger, no_save):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -160,6 +160,7 @@ class DualSupWithJANModel:
         self.jmmd_loss.train()
         self.logger = logger
         self.combined_batch = combined_batch
+        self.no_save = no_save
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
@@ -221,36 +222,37 @@ class DualSupWithJANModel:
                                     jmmd_loss_total / num_batches,
                                     comb_loss_total / num_batches, time.time() - start_time))
             
-            writer.add_scalars(
-                main_tag="training_loss",
-                tag_scalar_dict={
-                    'src_ce_loss_ep': src_ce_loss_total / num_batches,
-                    'src_ce_loss_batch': src_loss.item(),
-                    'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
-                    'trgt_ce_loss_batch': trgt_loss.item(),
-                    'jmmd_loss_ep': jmmd_loss_total / num_batches,
-                    'jmmd_loss_batch': jmmd_loss.item(),
-                    'comb_loss_ep': comb_loss_total / num_batches,
-                    'comb_loss_batch': total_loss.item(),
-                },
-                global_step=total_batches,
-            )
-            writer.add_scalars(
-                main_tag="training_lr",
-                tag_scalar_dict={
-                    'bb': optimizer.param_groups[0]['lr'],
-                    'fc': optimizer.param_groups[1]['lr'],
-                },
-                global_step=total_batches,
-            )
-            writer.add_scalars(
-                main_tag="training",
-                tag_scalar_dict={
-                    'p': p,
-                    'lambda': alfa,
-                },
-                global_step=total_batches,
-            )
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'src_ce_loss_ep': src_ce_loss_total / num_batches,
+                        'src_ce_loss_batch': src_loss.item(),
+                        'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
+                        'trgt_ce_loss_batch': trgt_loss.item(),
+                        'jmmd_loss_ep': jmmd_loss_total / num_batches,
+                        'jmmd_loss_batch': jmmd_loss.item(),
+                        'comb_loss_ep': comb_loss_total / num_batches,
+                        'comb_loss_batch': total_loss.item(),
+                    },
+                    global_step=total_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'fc': optimizer.param_groups[1]['lr'],
+                    },
+                    global_step=total_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training",
+                    tag_scalar_dict={
+                        'p': p,
+                        'lambda': alfa,
+                    },
+                    global_step=total_batches,
+                )
             if scheduler is not None:
                 scheduler.step()
         
@@ -280,12 +282,14 @@ class DualSupWithJANModel:
             losses.append(total_loss / num_batches)
         self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
                                                                                      loader_names[1], losses[1]))
-        writer.add_scalars(main_tag="val_loss",
-                           tag_scalar_dict={
-                               loader_names[0]: losses[0],
-                               loader_names[1]: losses[1]
-                           },
-                           global_step=ep * steps)
+        
+        if not self.no_save:
+            writer.add_scalars(main_tag="val_loss",
+                               tag_scalar_dict={
+                                   loader_names[0]: losses[0],
+                                   loader_names[1]: losses[1]
+                               },
+                               global_step=ep * steps)
 
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
