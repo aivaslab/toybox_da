@@ -192,10 +192,14 @@ def main():
                        src_test_loader=src_loader_test, trgt_train_loader=trgt_loader_train,
                        trgt_test_loader=trgt_loader_test,
                        writer=tb_writer, step=0, logger=logger)
-    
+    model.calc_val_loss(ep=0, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
+                        loader_names=['tb_test', 'in12_test'])
     for ep in range(1, num_epochs + 1):
         model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                     ep=ep, ep_total=num_epochs, writer=tb_writer)
+        if ep % 5 == 0:
+            model.calc_val_loss(ep=ep, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
+                                loader_names=['tb_test', 'in12_test'])
         if ep % 20 == 0 and ep != num_epochs:
             get_train_test_acc(model=model,
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,
