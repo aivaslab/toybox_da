@@ -503,11 +503,12 @@ class DualSupModel:
 class DualSupModelWithDomain:
     """Module implementing the combined supervised pretraining on source and target and domain classification"""
     
-    def __init__(self, network, source_loader, target_loader, logger):
+    def __init__(self, network, source_loader, target_loader, logger, no_save=False):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
         self.logger = logger
+        self.no_save = no_save
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
@@ -561,29 +562,29 @@ class DualSupModelWithDomain:
                                          src_ce_loss_total / num_batches, trgt_ce_loss_total / num_batches,
                                          dom_loss_total / num_batches,
                                          time.time() - start_time))
-            
-            writer.add_scalars(
-                main_tag="training_loss",
-                tag_scalar_dict={
-                    'src_ce_loss_ep': src_ce_loss_total / num_batches,
-                    'src_ce_loss_batch': src_loss.item(),
-                    'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
-                    'trgt_ce_loss_batch': trgt_loss.item(),
-                    'dom_loss_ep': dom_loss_total / num_batches,
-                    'dom_loss_batch': dom_loss.item(),
-                    'total_loss_batch': total_loss.item(),
-                },
-                global_step=(ep - 1) * steps + num_batches,
-            )
-            writer.add_scalars(
-                main_tag="training_lr",
-                tag_scalar_dict={
-                    'bb': optimizer.param_groups[0]['lr'],
-                    'fc': optimizer.param_groups[1]['lr'],
-                    'dom_fc': optimizer.param_groups[2]['lr']
-                },
-                global_step=(ep - 1) * steps + num_batches,
-            )
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'src_ce_loss_ep': src_ce_loss_total / num_batches,
+                        'src_ce_loss_batch': src_loss.item(),
+                        'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
+                        'trgt_ce_loss_batch': trgt_loss.item(),
+                        'dom_loss_ep': dom_loss_total / num_batches,
+                        'dom_loss_batch': dom_loss.item(),
+                        'total_loss_batch': total_loss.item(),
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'fc': optimizer.param_groups[1]['lr'],
+                        'dom_fc': optimizer.param_groups[2]['lr']
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  "
                          "SCE: {:.3f}  TCE: {:.3f}  D-BCE: {:.3f}  "
                          "T: {:.2f}s".format(ep, ep_total, steps, steps,
@@ -610,12 +611,13 @@ class DualSupModelWithDomain:
             losses.append(total_loss / num_batches)
         self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
                                                                                      loader_names[1], losses[1]))
-        writer.add_scalars(main_tag="val_loss",
-                           tag_scalar_dict={
-                               loader_names[0]: losses[0],
-                               loader_names[1]: losses[1]
-                           },
-                           global_step=ep * steps)
+        if not self.no_save:
+            writer.add_scalars(main_tag="val_loss",
+                               tag_scalar_dict={
+                                   loader_names[0]: losses[0],
+                                   loader_names[1]: losses[1]
+                               },
+                               global_step=ep * steps)
 
     def eval(self, loader, source):
         """Evaluate the model on the provided dataloader"""
