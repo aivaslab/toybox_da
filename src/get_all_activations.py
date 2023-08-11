@@ -50,9 +50,9 @@ def get_all_activations_sup(model_path, out_path):
     """Get the activations from a supervised model"""
     os.makedirs(out_path, exist_ok=True)
     assert model_path is not None
-    # load_file = torch.load(model_path)
-    # net = networks.ResNet18BackboneWithActivations(weights=load_file['backbone'], pretrained=False)
-    net = networks.ResNet18BackboneWithActivations(pretrained=True)
+    load_file = torch.load(model_path)
+    net = networks.ResNet18BackboneWithActivations(weights=load_file['backbone'], pretrained=False)
+    # net = networks.ResNet18BackboneWithActivations(pretrained=True)
     # fc_size = net.fc_size
     net.cuda()
     net.set_eval()
