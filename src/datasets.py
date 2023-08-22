@@ -482,3 +482,102 @@ class ToyboxDataset(torchdata.Dataset):
                     assert row_video in self.views
                     self.indicesSelected.append(idx_row)
     
+                    
+class ToyboxDatasetSSL(torchdata.Dataset):
+    """Class definition for Toybox dataset for SSL experiments"""
+    KEYS = {
+        'tr_start': 'Tr Start',
+        'tr_end': 'Tr End',
+        'obj_start': 'Obj Start',
+        'obj_end': 'Obj End',
+        'tr': 'Transformation',
+        'cl_start': 'CL Start',
+        'cl_end': 'CL End',
+        'cl_id': 'Class ID',
+    }
+    
+    def __init__(self, rng, transform=None, hypertune=True, distort='transform', fraction=1.0,
+                 distortArg=False, adj=-1):
+        self.rng = rng
+        self.transform = transform
+        self.distort = distort
+        self.fraction = fraction
+        self.distortArg = distortArg
+        self.adj = adj
+
+        self.tr_start_key = 'Tr Start'
+        self.tr_end_key = 'Tr End'
+        self.obj_start_key = 'Obj Start'
+        self.obj_end_key = 'Obj End'
+        self.tr_key = 'Transformation'
+        self.cl_start_key = 'CL Start'
+        self.cl_end_key = 'CL End'
+        
+        if not hypertune:
+            self.trainImagesFile = "../data/data_12/Toybox/toybox_data_interpolated_cropped_train.pickle"
+            self.trainLabelsFile = "../data/data_12/Toybox/toybox_data_interpolated_cropped_train.csv"
+        else:
+            self.trainImagesFile = "../data/data_12/Toybox/toybox_data_interpolated_cropped_dev.pickle"
+            self.trainLabelsFile = "../data/data_12/Toybox/toybox_data_interpolated_cropped_dev.csv"
+
+        with open(self.trainImagesFile, "rb") as pickleFile:
+            self.train_data = pickle.load(pickleFile)
+        with open(self.trainLabelsFile, "r") as csvFile:
+            self.train_csvFile = list(csv.DictReader(csvFile))
+        lenWholeData = len(self.train_data)
+        lenTrainData = int(self.fraction * lenWholeData)
+        self.indicesSelected = rng.choice(lenWholeData, lenTrainData, replace=False)
+
+    def __len__(self):
+        return len(self.indicesSelected)
+
+    def __getitem__(self, index):
+        actualIndex = self.indicesSelected[index]
+        img = np.array(cv2.imdecode(self.train_data[actualIndex], 3))
+        label = self.train_csvFile[actualIndex]['Class ID']
+    
+        if self.distort == 'self':
+            img2 = img
+        elif self.distort == 'object':
+            low, high = int(self.train_csvFile[actualIndex][self.obj_start_key]), \
+                        int(self.train_csvFile[actualIndex][self.obj_end_key])
+            id2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+            img2 = np.array(cv2.imdecode(self.train_data[id2], 3))
+            
+        elif self.distort == 'class':
+            low, high = int(self.train_csvFile[actualIndex][self.cl_start_key]), \
+                        int(self.train_csvFile[actualIndex][self.cl_end_key])
+            id2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+            img2 = np.array(cv2.imdecode(self.train_data[id2], 3))
+
+        else:
+            if self.adj == -1:
+                low, high = int(self.train_csvFile[actualIndex][self.tr_start_key]), int(
+                    self.train_csvFile[actualIndex][self.tr_end_key])
+                id2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+            else:
+                low = max(0, actualIndex - self.adj)
+                high = min(int(len(self.train_data)) - 1, actualIndex + self.adj)
+                try:
+                    if self.train_csvFile[low][self.tr_key] != self.train_csvFile[actualIndex][self.tr_key]:
+                        id2 = high
+                    elif self.train_csvFile[high][self.tr_key] != self.train_csvFile[actualIndex][self.tr_key]:
+                        id2 = low
+                    else:
+                        if self.distortArg:
+                            id2 = self.rng.choice([low, high], 1)[0]
+                        else:
+                            id2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+                except IndexError:
+                    print(low, actualIndex, high)
+                    raise RuntimeError("Error in calculating index.")
+            img2 = np.array(cv2.imdecode(self.train_data[id2], 3))
+        if self.transform is not None:
+            imgs = [self.transform(img), self.transform(img2)]
+        else:
+            imgs = [img, img2]
+                
+        return (index, actualIndex), imgs
+    
+    def __str__(self):
+        return "Toybox SSL"
