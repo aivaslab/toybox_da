@@ -22,7 +22,7 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 
 def get_parser():
-    """Return parser for JAN experiments"""
+    """Return parser for SimCLR experiments on both IN-12 and Toybox"""
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("-e", "--epochs", default=50, type=int, help="Number of epochs of training")
     parser.add_argument("-it", "--iters", default=500, type=int, help="Number of training steps per epoch")
@@ -32,8 +32,8 @@ def get_parser():
                         help="Use this flag to run experiments on train+val set")
     parser.add_argument("-lr", "--lr", default=0.05, type=float, help="Learning rate for the experiment")
     parser.add_argument("-wd", "--wd", default=1e-5, type=float, help="Weight decay for optimizer")
-    parser.add_argument("--instances", default=-1, type=int, help="Set number of toybox instances to train on")
-    parser.add_argument("--images", default=1000, type=int, help="Set number of images per class to train on")
+    parser.add_argument("--source-frac", "-sf", default=0.2, type=float,
+                        help="Set fraction of training images to be used for source dataset")
     parser.add_argument("--target-frac", "-tf", default=1.0, type=float,
                         help="Set fraction of training images to be used for target dataset")
     parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
@@ -57,10 +57,8 @@ def main():
     b_size = exp_args['bsize']
     n_workers = exp_args['workers']
     hypertune = not exp_args['final']
-    num_instances = exp_args['instances']
-    num_images_per_class = exp_args['images']
-    # combined_batch = exp_args['combined_batch']
     target_frac = exp_args['target_frac']
+    source_frac = exp_args['source_frac']
     no_save = exp_args['no_save']
     
     start_time = datetime.datetime.now()
@@ -91,8 +89,7 @@ def main():
     
     src_data_train = datasets.ToyboxDatasetSSL(rng=np.random.default_rng(exp_args['seed']),
                                                transform=src_transform_train,
-                                               hypertune=hypertune, fraction=0.2,
-                                               )
+                                               hypertune=hypertune, fraction=source_frac)
     logger.info(f"Source dataset: {src_data_train}  Size: {len(src_data_train)}")
     src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
                                             drop_last=True)
