@@ -57,18 +57,20 @@ class JANModel:
             
             if self.combined_batch:
                 comb_images = torch.concat([src_images, trgt_images], dim=0)
-                feats, logits = self.network.forward(comb_images)
+                bb_feats, btl_feats, logits = self.network.forward(comb_images)
                 src_size = src_images.shape[0]
-                src_feats, src_logits = feats[:src_size], logits[:src_size]
-                trgt_feats, trgt_logits = feats[src_size:], logits[src_size:]
+                src_bb_feats, src_btl_feats, src_logits = bb_feats[:src_size], btl_feats[:src_size], logits[:src_size]
+                trgt_bb_feats, trgt_btl_feats, trgt_logits = \
+                    bb_feats[src_size:], btl_feats[src_size:], logits[src_size:]
             else:
-                src_feats, src_logits = self.network.forward(src_images)
-                trgt_feats, trgt_logits = self.network.forward(trgt_images)
+                src_bb_feats, src_btl_feats, src_logits = self.network.forward(src_images)
+                trgt_bb_feats, trgt_btl_feats, trgt_logits = self.network.forward(trgt_images)
                 
             src_loss = src_criterion(src_logits, src_labels)
             
             jmmd_loss = self.jmmd_loss(
-                (src_feats, func.softmax(src_logits, dim=1)), (trgt_feats, func.softmax(trgt_logits, dim=1)))
+                (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
+                (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
             total_loss = src_loss + alfa * jmmd_loss
             
             total_loss.backward()
@@ -126,6 +128,32 @@ class JANModel:
                             optimizer.param_groups[0]['lr'], optimizer.param_groups[2]['lr'],
                             ce_loss_total / num_batches, jmmd_loss_total / num_batches, comb_loss_total / num_batches,
                             time.time() - start_time))
+
+    def calc_val_loss(self, loaders, loader_names, ep, steps, writer: tb.SummaryWriter):
+        """Calculate loss on provided dataloader"""
+        self.network.set_eval()
+        criterion = nn.CrossEntropyLoss()
+        losses = []
+        for idx, loader in enumerate(loaders):
+            num_batches = 0
+            total_loss = 0.0
+            for _, (idxs, images, labels) in enumerate(loader):
+                num_batches += 1
+                images, labels = images.cuda(), labels.cuda()
+                with torch.no_grad():
+                    _, _, logits = self.network.forward(images)
+                loss = criterion(logits, labels)
+                total_loss += loss.item()
+            losses.append(total_loss / num_batches)
+        self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
+                                                                                     loader_names[1], losses[1]))
+    
+        writer.add_scalars(main_tag="val_loss",
+                           tag_scalar_dict={
+                               loader_names[0]: losses[0],
+                               loader_names[1]: losses[1]
+                           },
+                           global_step=ep * steps)
     
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
@@ -135,7 +163,7 @@ class JANModel:
         for _, (idxs, images, labels) in enumerate(loader):
             images, labels = images.cuda(), labels.cuda()
             with torch.no_grad():
-                _, logits = self.network.forward(images)
+                _, _, logits = self.network.forward(images)
             top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
             n_correct += top[0].item() * pred.shape[0]
             n_total += pred.shape[0]

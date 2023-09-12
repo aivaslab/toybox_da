@@ -91,15 +91,27 @@ def main():
     tb_writer = tb.SummaryWriter(log_dir=tb_path)
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt")
     
+    prob = 0.2
+    color_transforms = [transforms.RandomApply([transforms.ColorJitter(brightness=0.2)], p=prob),
+                        transforms.RandomApply([transforms.ColorJitter(hue=0.2)], p=prob),
+                        transforms.RandomApply([transforms.ColorJitter(saturation=0.2)], p=prob),
+                        transforms.RandomApply([transforms.ColorJitter(contrast=0.2)], p=prob),
+                        transforms.RandomEqualize(p=prob),
+                        transforms.RandomPosterize(bits=4, p=prob),
+                        transforms.RandomAutocontrast(p=prob)
+                        ]
     src_transform_train = transforms.Compose([transforms.ToPILImage(),
                                               transforms.Resize((256, 256)),
                                               transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
                                                                            interpolation=
                                                                            transforms.InterpolationMode.BICUBIC),
+                                              transforms.RandomOrder(color_transforms),
                                               transforms.RandomHorizontalFlip(),
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD),
+                                              transforms.RandomErasing(p=0.5)
                                               ])
+    
     src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['seed']), train=True,
                                             transform=src_transform_train,
                                             hypertune=hypertune, num_instances=num_instances,
@@ -117,11 +129,18 @@ def main():
     src_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(), train=False, transform=src_transform_test,
                                            hypertune=hypertune)
     src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
-
+    
     trgt_transform_train = transforms.Compose([transforms.ToPILImage(),
-                                              transforms.Resize((224, 224)),
-                                              transforms.ToTensor(),
-                                              transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
+                                               transforms.Resize((256, 256)),
+                                               transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
+                                                                            interpolation=
+                                                                            transforms.InterpolationMode.BICUBIC),
+                                               transforms.RandomOrder(color_transforms),
+                                               transforms.RandomHorizontalFlip(),
+                                               transforms.ToTensor(),
+                                               transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD),
+                                               transforms.RandomErasing(p=0.5)
+                                               ])
     trgt_data_train = datasets.DatasetIN12(train=True, transform=trgt_transform_train, fraction=1.0,
                                            hypertune=hypertune)
     trgt_loader_train = torchdata.DataLoader(trgt_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
@@ -155,8 +174,8 @@ def main():
     bb_lr_wt = 0.1 if (exp_args['pretrained'] or
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
         else 1.0
-        
-    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=bb_lr_wt*exp_args['lr'], weight_decay=exp_args['wd'])
+    
+    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=bb_lr_wt * exp_args['lr'], weight_decay=exp_args['wd'])
     optimizer.add_param_group({'params': net.bottleneck.parameters(), 'lr': exp_args['lr']})
     optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': exp_args['lr']})
     
@@ -166,10 +185,16 @@ def main():
     get_train_test_acc(model=model, src_train_loader=src_loader_train,
                        src_test_loader=src_loader_test, trgt_loader=trgt_loader_test,
                        writer=tb_writer, step=0, logger=logger)
+
+    model.calc_val_loss(ep=0, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
+                        loader_names=['tb_test', 'in12_test'])
     
     for ep in range(1, num_epochs + 1):
         model.train(optimizer=optimizer, scheduler=lr_scheduler, steps=steps,
                     ep=ep, ep_total=num_epochs, writer=tb_writer)
+        if ep % 5 == 0:
+            model.calc_val_loss(ep=ep, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
+                                loader_names=['tb_test', 'in12_test'])
         if ep % 20 == 0 and ep != num_epochs:
             get_train_test_acc(model=model, src_train_loader=src_loader_train,
                                src_test_loader=src_loader_test, trgt_loader=trgt_loader_test,

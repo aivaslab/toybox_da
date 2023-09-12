@@ -38,7 +38,7 @@ class ResNet18JAN(nn.Module):
         """Forward method"""
         backbone_feats = self.backbone.forward(x)
         bottleneck_feats = self.bottleneck.forward(backbone_feats)
-        return bottleneck_feats, self.classifier_head.forward(bottleneck_feats)
+        return backbone_feats, bottleneck_feats, self.classifier_head.forward(bottleneck_feats)
     
     def set_train(self):
         """Set network in train mode"""
