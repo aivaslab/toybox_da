@@ -648,9 +648,10 @@ class DualSupModelWithDomain:
 
 
 class DualSupWithCCMMDModel:
-    """Module implementing the Dual Supervised Model with Jan loss"""
+    """Module implementing the Dual Supervised Model with CCMMD loss"""
     
-    def __init__(self, network, source_loader, target_loader, combined_batch, logger, lmbda=0.05):
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger, scramble_labels=False,
+                 scrambler_seed=None, lmbda=0.05):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -661,6 +662,12 @@ class DualSupWithCCMMDModel:
         self.ccmmd_loss.train()
         self.logger = logger
         self.combined_batch = combined_batch
+        self.scramble_labels = scramble_labels
+        self.scrambler_seed = scrambler_seed if scrambler_seed else 42
+        import scramble_labels
+        self.scrambler = \
+            scramble_labels.RandomToyboxScrambler(seed=self.scrambler_seed) if self.scramble_labels else None
+        
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
@@ -699,7 +706,11 @@ class DualSupWithCCMMDModel:
             
             src_loss = ce_criterion(src_logits, src_labels)
             trgt_loss = ce_criterion(trgt_logits, trgt_labels)
-            ccmmd_loss = self.ccmmd_loss(z_s=src_feats, z_t=trgt_feats, l_s=src_labels, l_t=trgt_labels)
+            if self.scrambler is not None:
+                scrambled_trgt_labels = self.scrambler.scramble(labels=trgt_labels)
+            else:
+                scrambled_trgt_labels = trgt_labels.clone()
+            ccmmd_loss = self.ccmmd_loss(z_s=src_feats, z_t=trgt_feats, l_s=src_labels, l_t=scrambled_trgt_labels)
             total_loss = src_loss + trgt_loss + self.lmbda * alfa * ccmmd_loss
             
             total_loss.backward()
