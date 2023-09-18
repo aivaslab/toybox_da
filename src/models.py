@@ -378,13 +378,20 @@ class SupModel:
 class DualSupModel:
     """Module implementing the combined supervised pretraining on source and target"""
     
-    def __init__(self, network, source_loader, target_loader, combined_batch, logger):
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger,
+                 scramble_target_for_classification=False, scrambler_seed=None):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
         self.logger = logger
         self.combined_batch = combined_batch
         self.network.cuda()
+        
+        self.scramble_labels = scramble_target_for_classification
+        self.scrambler_seed = scrambler_seed if scrambler_seed is not None else 42
+        import scramble_labels
+        self.scrambler = \
+            scramble_labels.RandomToyboxScrambler(seed=self.scrambler_seed) if self.scramble_labels else None
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
@@ -412,9 +419,14 @@ class DualSupModel:
             else:
                 src_logits = self.network.forward(src_images)
                 trgt_logits = self.network.forward(trgt_images)
+                
+            if self.scrambler is not None:
+                scrambled_trgt_labels = self.scrambler.scramble(trgt_labels)
+            else:
+                scrambled_trgt_labels = trgt_labels.clone()
             
             src_loss = criterion(src_logits, src_labels)
-            trgt_loss = criterion(trgt_logits, trgt_labels)
+            trgt_loss = criterion(trgt_logits, scrambled_trgt_labels)
             total_loss = src_loss + trgt_loss
             
             total_loss.backward()
@@ -470,9 +482,13 @@ class DualSupModel:
             for _, (idxs, images, labels) in enumerate(loader):
                 num_batches += 1
                 images, labels = images.cuda(), labels.cuda()
+                if "in12" in loader_names[idx] and self.scrambler is not None and self.scramble_labels:
+                    scrambled_labels = self.scrambler.scramble(labels)
+                else:
+                    scrambled_labels = labels.clone()
                 with torch.no_grad():
                     logits = self.network.forward(images)
-                loss = criterion(logits, labels)
+                loss = criterion(logits, scrambled_labels)
                 total_loss += loss.item()
             losses.append(total_loss/num_batches)
         self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
@@ -484,16 +500,20 @@ class DualSupModel:
                            },
                            global_step=ep*steps)
     
-    def eval(self, loader):
+    def eval(self, loader, scramble=False):
         """Evaluate the model on the provided dataloader"""
         n_total = 0
         n_correct = 0
         self.network.set_eval()
         for _, (idxs, images, labels) in enumerate(loader):
             images, labels = images.cuda(), labels.cuda()
+            if scramble and self.scrambler is not None:
+                scrambled_labels = self.scrambler.scramble(labels)
+            else:
+                scrambled_labels = labels.clone()
             with torch.no_grad():
                 logits = self.network.forward(images)
-            top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
+            top, pred = utils.calc_accuracy(output=logits, target=scrambled_labels, topk=(1,))
             n_correct += top[0].item() * pred.shape[0]
             n_total += pred.shape[0]
         acc = n_correct / n_total
@@ -663,7 +683,7 @@ class DualSupWithCCMMDModel:
         self.logger = logger
         self.combined_batch = combined_batch
         self.scramble_labels = scramble_labels
-        self.scrambler_seed = scrambler_seed if scrambler_seed else 42
+        self.scrambler_seed = scrambler_seed if scrambler_seed is not None else 42
         import scramble_labels
         self.scrambler = \
             scramble_labels.RandomToyboxScrambler(seed=self.scrambler_seed) if self.scramble_labels else None
