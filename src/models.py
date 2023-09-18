@@ -651,7 +651,7 @@ class DualSupWithCCMMDModel:
     """Module implementing the Dual Supervised Model with CCMMD loss"""
     
     def __init__(self, network, source_loader, target_loader, combined_batch, logger, scramble_labels=False,
-                 scrambler_seed=None, lmbda=0.05):
+                 scrambler_seed=None, scramble_target_for_classification=False, lmbda=0.05):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -667,7 +667,7 @@ class DualSupWithCCMMDModel:
         import scramble_labels
         self.scrambler = \
             scramble_labels.RandomToyboxScrambler(seed=self.scrambler_seed) if self.scramble_labels else None
-        
+        self.scramble_target_for_classification = scramble_target_for_classification
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
@@ -705,11 +705,17 @@ class DualSupWithCCMMDModel:
                 trgt_feats, trgt_logits = self.network.forward(trgt_images)
             
             src_loss = ce_criterion(src_logits, src_labels)
-            trgt_loss = ce_criterion(trgt_logits, trgt_labels)
             if self.scrambler is not None:
                 scrambled_trgt_labels = self.scrambler.scramble(labels=trgt_labels)
+                if self.scramble_target_for_classification:
+                    scrambled_trgt_labels_cl = scrambled_trgt_labels.clone()
+                else:
+                    scrambled_trgt_labels_cl = trgt_labels.clone()
             else:
                 scrambled_trgt_labels = trgt_labels.clone()
+                scrambled_trgt_labels_cl = trgt_labels.clone()
+                
+            trgt_loss = ce_criterion(trgt_logits, scrambled_trgt_labels_cl)
             ccmmd_loss = self.ccmmd_loss(z_s=src_feats, z_t=trgt_feats, l_s=src_labels, l_t=scrambled_trgt_labels)
             total_loss = src_loss + trgt_loss + self.lmbda * alfa * ccmmd_loss
             
@@ -784,9 +790,14 @@ class DualSupWithCCMMDModel:
             for _, (idxs, images, labels) in enumerate(loader):
                 num_batches += 1
                 images, labels = images.cuda(), labels.cuda()
+                if "in12" in loader_names[idx] and self.scrambler is not None \
+                        and self.scramble_target_for_classification:
+                    scrambled_labels = self.scrambler.scramble(labels)
+                else:
+                    scrambled_labels = labels.clone()
                 with torch.no_grad():
                     _, logits = self.network.forward(images)
-                loss = criterion(logits, labels)
+                loss = criterion(logits, scrambled_labels)
                 total_loss += loss.item()
             losses.append(total_loss / num_batches)
         self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
@@ -798,16 +809,20 @@ class DualSupWithCCMMDModel:
                            },
                            global_step=ep * steps)
 
-    def eval(self, loader):
+    def eval(self, loader, scramble=False):
         """Evaluate the model on the provided dataloader"""
         n_total = 0
         n_correct = 0
         self.network.set_eval()
         for _, (idxs, images, labels) in enumerate(loader):
             images, labels = images.cuda(), labels.cuda()
+            if scramble and self.scrambler is not None:
+                scrambled_labels = self.scrambler.scramble(labels)
+            else:
+                scrambled_labels = labels.clone()
             with torch.no_grad():
                 _, logits = self.network.forward(images)
-            top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
+            top, pred = utils.calc_accuracy(output=logits, target=scrambled_labels, topk=(1,))
             n_correct += top[0].item() * pred.shape[0]
             n_total += pred.shape[0]
         acc = n_correct / n_total
