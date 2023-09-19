@@ -174,7 +174,8 @@ class JANModel:
 class DualSupWithJANModel:
     """Module implementing the Dual Supervised Model with Jan loss"""
     
-    def __init__(self, network, source_loader, target_loader, combined_batch, logger, no_save):
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger, no_save,
+                 scramble_target_for_classification=False, scrambler_seed=None):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -191,6 +192,12 @@ class DualSupWithJANModel:
         self.no_save = no_save
         self.network.cuda()
     
+        self.scramble_labels = scramble_target_for_classification
+        self.scrambler_seed = scrambler_seed if scrambler_seed is not None else 42
+        import scramble_labels
+        self.scrambler = \
+            scramble_labels.RandomToyboxScrambler(seed=self.scrambler_seed) if self.scramble_labels else None
+        
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
         self.network.set_train()
@@ -224,9 +231,14 @@ class DualSupWithJANModel:
             else:
                 src_feats, src_logits = self.network.forward(src_images)
                 trgt_feats, trgt_logits = self.network.forward(trgt_images)
+                
+            if self.scrambler is not None:
+                scrambled_trgt_labels = self.scrambler.scramble(trgt_labels)
+            else:
+                scrambled_trgt_labels = trgt_labels.clone()
             
             src_loss = ce_criterion(src_logits, src_labels)
-            trgt_loss = ce_criterion(trgt_logits, trgt_labels)
+            trgt_loss = ce_criterion(trgt_logits, scrambled_trgt_labels)
             jmmd_loss = self.jmmd_loss(
                 (src_feats, func.softmax(src_logits, dim=1)), (trgt_feats, func.softmax(trgt_logits, dim=1)))
             total_loss = src_loss + trgt_loss + alfa * jmmd_loss
@@ -303,9 +315,13 @@ class DualSupWithJANModel:
             for _, (idxs, images, labels) in enumerate(loader):
                 num_batches += 1
                 images, labels = images.cuda(), labels.cuda()
+                if "in12" in loader_names[idx] and self.scrambler is not None and self.scramble_labels:
+                    scrambled_labels = self.scrambler.scramble(labels)
+                else:
+                    scrambled_labels = labels.clone()
                 with torch.no_grad():
                     _, logits = self.network.forward(images)
-                loss = criterion(logits, labels)
+                loss = criterion(logits, scrambled_labels)
                 total_loss += loss.item()
             losses.append(total_loss / num_batches)
         self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
@@ -319,13 +335,17 @@ class DualSupWithJANModel:
                                },
                                global_step=ep * steps)
 
-    def eval(self, loader):
+    def eval(self, loader, scramble=False):
         """Evaluate the model on the provided dataloader"""
         n_total = 0
         n_correct = 0
         self.network.set_eval()
         for _, (idxs, images, labels) in enumerate(loader):
             images, labels = images.cuda(), labels.cuda()
+            if scramble and self.scrambler is not None:
+                scrambled_labels = self.scrambler.scramble(labels)
+            else:
+                scrambled_labels = labels.clone()
             with torch.no_grad():
                 _, logits = self.network.forward(images)
             top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))

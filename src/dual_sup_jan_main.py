@@ -26,8 +26,8 @@ def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_train_load
     """Get train and test accuracy"""
     src_tr_acc = model.eval(loader=src_train_loader)
     src_te_acc = model.eval(loader=src_test_loader)
-    trgt_tr_acc = model.eval(loader=trgt_train_loader)
-    trgt_te_acc = model.eval(loader=trgt_test_loader)
+    trgt_tr_acc = model.eval(loader=trgt_train_loader, scramble=True)
+    trgt_te_acc = model.eval(loader=trgt_test_loader, scramble=True)
     logger.info("Source Train acc: {:.2f}   Source Test acc: {:.2f}   Target Train Acc:{:.2f}   Target Test Acc:{:.2f}"
                 .format(src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc))
     if not no_save:
@@ -67,6 +67,8 @@ def get_parser():
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
     parser.add_argument("--no-save", default=False, action='store_true', help="Set this flag to not save anything")
+    parser.add_argument("--scramble-cl", default=False, action='store_true',
+                        help="Set this flag to scramble target labels during training")
     return vars(parser.parse_args())
 
 
@@ -94,6 +96,7 @@ def main():
     combined_batch = exp_args['combined_batch']
     target_frac = exp_args['target_frac']
     no_save = exp_args['no_save']
+    scramble_cl = exp_args['scramble_cl']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -175,7 +178,8 @@ def main():
         net = networks.ResNet18DualSupJAN(num_classes=12, pretrained=exp_args['pretrained'])
     
     model = models_da.DualSupWithJANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-                                          logger=logger, combined_batch=combined_batch, no_save=no_save)
+                                          logger=logger, combined_batch=combined_batch, no_save=no_save,
+                                          scramble_target_for_classification=scramble_cl)
     
     bb_lr_wt = 0.1 if (exp_args['pretrained'] or
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
