@@ -3,6 +3,10 @@ import torch
 import torch.nn as nn
 import time
 import torch.utils.tensorboard as tb
+import torch.nn.functional as func
+
+import tllib.alignment.jan as jan
+import tllib.modules.kernels as kernels
 
 import utils
 
@@ -41,10 +45,10 @@ class DualSupModelWithScrambledTargetClasses:
             
             if self.combined_batch:
                 comb_images = torch.concat([src_images, trgt_images], dim=0)
-                src_logits, trgt_logits = self.network.forward(comb_images)
+                _, _, src_logits, trgt_logits = self.network.forward(comb_images)
             else:
-                src_logits = self.network.forward_1(src_images)
-                trgt_logits = self.network.forward_2(trgt_images)
+                _, src_logits = self.network.forward_1(src_images)
+                _, trgt_logits = self.network.forward_2(trgt_images)
             
             scrambled_trgt_labels = self.scrambler.scramble(trgt_labels)
             
@@ -110,7 +114,7 @@ class DualSupModelWithScrambledTargetClasses:
                 else:
                     scrambled_labels = labels.clone()
                 with torch.no_grad():
-                    logits = self.network.forward_2(images) if "in12" in loader_names[idx] \
+                    _, logits = self.network.forward_2(images) if "in12" in loader_names[idx] \
                         else self.network.forward_1(images)
                 loss = criterion(logits, scrambled_labels)
                 total_loss += loss.item()
@@ -135,8 +139,8 @@ class DualSupModelWithScrambledTargetClasses:
             images, labels = images.cuda(), labels.cuda()
             scrambled_labels = self.scrambler.scramble(labels)
             with torch.no_grad():
-                logits_1 = self.network.forward_1(images)
-                logits_2 = self.network.forward_2(images)
+                _, logits_1 = self.network.forward_1(images)
+                _, logits_2 = self.network.forward_2(images)
             top, pred = utils.calc_accuracy(output=logits_1, target=labels, topk=(1,))
             n_correct += top[0].item() * pred.shape[0]
             n_total += pred.shape[0]
@@ -147,3 +151,4 @@ class DualSupModelWithScrambledTargetClasses:
         acc = n_correct / n_total
         acc_2 = n_correct_2 / n_total_2
         return round(acc, 2), round(acc_2, 2)
+

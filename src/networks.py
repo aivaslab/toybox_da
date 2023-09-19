@@ -226,17 +226,18 @@ class ResNet18Sup12x2(nn.Module):
         bsize = x.shape[0]
         src_size = bsize // 2
         src_feats, trgt_feats = feats[:src_size], feats[src_size:]
-        return self.classifier_head_1.forward(src_feats), self.classifier_head_2.forward(trgt_feats)
+        return src_feats, trgt_feats, \
+            self.classifier_head_1.forward(src_feats), self.classifier_head_2.forward(trgt_feats)
     
     def forward_1(self, x):
         """Forward method through classifier 1"""
         feats = self.backbone.forward(x)
-        return self.classifier_head_1.forward(feats)
+        return feats, self.classifier_head_1.forward(feats)
 
     def forward_2(self, x):
         """Forward method through classifier 2"""
         feats = self.backbone.forward(x)
-        return self.classifier_head_2.forward(feats)
+        return feats, self.classifier_head_2.forward(feats)
 
     def set_train(self):
         """Set network in train mode"""
