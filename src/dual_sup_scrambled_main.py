@@ -72,6 +72,8 @@ def get_parser():
                         help="Use this flag to start from pretrained network")
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--mmd", default=False, action="store_true",
+                        help="Use this option to use mmd_loss in aligning the two domains")
     return vars(parser.parse_args())
 
 
@@ -98,6 +100,7 @@ def main():
     num_images_per_class = exp_args['images']
     combined_batch = exp_args['combined_batch']
     target_frac = exp_args['target_frac']
+    mmd = exp_args['mmd']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -178,11 +181,15 @@ def main():
         net = networks.ResNet18Sup12x2(num_classes=12, backbone_weights=bb_wts, classifier_weights=cl_wts)
     else:
         net = networks.ResNet18Sup12x2(num_classes=12, pretrained=exp_args['pretrained'])
-    
-    model = models_scrambled.DualSupModelWithScrambledTargetClasses(
-        network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-        logger=logger, combined_batch=combined_batch
-    )
+    if mmd:
+        model = models_scrambled.JANModelWithScrambledTargetClasses(
+            network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
+            logger=logger, combined_batch=combined_batch)
+    else:
+        model = models_scrambled.DualSupModelWithScrambledTargetClasses(
+            network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
+            logger=logger, combined_batch=combined_batch
+        )
     
     bb_lr_wt = 0.1 if (exp_args['pretrained'] or
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
