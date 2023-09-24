@@ -304,10 +304,11 @@ class SupContrModel:
 class SupModel:
     """Module implementing the supervised pretraining on source"""
     
-    def __init__(self, network, source_loader, logger):
+    def __init__(self, network, source_loader, logger, no_save=False):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.logger = logger
+        self.no_save = no_save
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
@@ -338,23 +339,23 @@ class SupModel:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
                     ep, ep_total, step, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                     ce_loss_total / num_batches, time.time() - start_time))
-            
-            writer.add_scalars(
-                main_tag="training_loss",
-                tag_scalar_dict={
-                    'ce_loss_ep': ce_loss_total / num_batches,
-                    'ce_loss_batch': src_loss.item(),
-                },
-                global_step=(ep - 1) * steps + num_batches,
-            )
-            writer.add_scalars(
-                main_tag="training_lr",
-                tag_scalar_dict={
-                    'bb': optimizer.param_groups[0]['lr'],
-                    'fc': optimizer.param_groups[1]['lr'],
-                },
-                global_step=(ep - 1) * steps + num_batches,
-            )
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'ce_loss_ep': ce_loss_total / num_batches,
+                        'ce_loss_batch': src_loss.item(),
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'fc': optimizer.param_groups[1]['lr'],
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
             ep, ep_total, steps, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
             ce_loss_total / num_batches, time.time() - start_time))
