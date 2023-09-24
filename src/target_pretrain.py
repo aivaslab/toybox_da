@@ -169,15 +169,23 @@ def main():
                        src_test_loader=src_loader_test, trgt_train_loader=trgt_loader_train,
                        trgt_test_loader=trgt_loader_test,
                        writer=tb_writer, step=0, logger=logger, no_save=no_save)
+    pre_model.calc_val_loss(loader=src_loader_test, loader_name="in12_test", ep=0, steps=steps, writer=tb_writer,
+                            no_save=no_save)
     
     for ep in range(1, num_epochs + 1):
         pre_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                         ep=ep, ep_total=num_epochs, writer=tb_writer)
+        if ep % 5 == 0 and ep != num_epochs:
+            pre_model.calc_val_loss(loader=src_loader_test, loader_name="in12_test", ep=ep, steps=steps,
+                                    writer=tb_writer, no_save=no_save)
         if ep % 20 == 0 and ep != num_epochs:
             get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                src_test_loader=src_loader_test, trgt_train_loader=trgt_loader_train,
                                trgt_test_loader=trgt_loader_test,
                                writer=tb_writer, step=ep * steps, logger=logger, no_save=no_save)
+
+    pre_model.calc_val_loss(loader=src_loader_test, loader_name="in12_test", ep=num_epochs, steps=steps,
+                            writer=tb_writer, no_save=no_save)
     
     src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc = get_train_test_acc(model=pre_model,
                                                                           src_train_loader=src_loader_train,

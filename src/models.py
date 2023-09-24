@@ -374,6 +374,28 @@ class SupModel:
             n_total += pred.shape[0]
         acc = n_correct / n_total
         return round(acc, 2)
+    
+    def calc_val_loss(self, loader, loader_name, ep, steps, writer: tb.SummaryWriter, no_save):
+        """Calculate loss on provided dataloader"""
+        self.network.set_eval()
+        criterion = nn.CrossEntropyLoss()
+        num_batches = 0
+        total_loss = 0.0
+        for _, (idxs, images, labels) in enumerate(loader):
+            num_batches += 1
+            images, labels = images.cuda(), labels.cuda()
+            
+            with torch.no_grad():
+                logits = self.network.forward(images)
+            loss = criterion(logits, labels)
+            total_loss += loss.item()
+        self.logger.info("Validation Losses -- {:s}: {:.2f}".format(loader_name, total_loss/num_batches))
+        if not no_save:
+            writer.add_scalars(main_tag="val_loss",
+                               tag_scalar_dict={
+                                   loader_name: total_loss/num_batches,
+                               },
+                               global_step=ep*steps)
 
 
 class DualSupModel:
