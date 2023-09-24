@@ -114,7 +114,7 @@ def main():
                                               ])
     src_data_train = datasets.DatasetIN12(train=True, hypertune=hypertune, fraction=frac, transform=src_transform_train,
                                           equal_div=True)
-    logger.debug(f"Dataset: {src_data_train}  Size: {len(src_data_train)}")
+    logger.info(f"Dataset: {src_data_train}  Size: {len(src_data_train)}")
     src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers)
     
     src_transform_test = transforms.Compose([transforms.ToPILImage(),
@@ -135,7 +135,7 @@ def main():
                                              hypertune=hypertune, num_instances=-1,
                                              num_images_per_class=1000,
                                              )
-    logger.debug(f"Dataset: {trgt_data_train}  Size: {len(trgt_data_train)}")
+    logger.info(f"Dataset: {trgt_data_train}  Size: {len(trgt_data_train)}")
     trgt_loader_train = torchdata.DataLoader(trgt_data_train, batch_size=b_size, shuffle=False, num_workers=n_workers)
     trgt_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(), train=False, transform=trgt_transform_test,
                                             hypertune=hypertune)
