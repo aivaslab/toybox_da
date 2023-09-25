@@ -694,7 +694,7 @@ class DualSupWithCCMMDModel:
     """Module implementing the Dual Supervised Model with CCMMD loss"""
     
     def __init__(self, network, source_loader, target_loader, combined_batch, logger, scramble_labels=False,
-                 scrambler_seed=None, scramble_target_for_classification=False, lmbda=0.05):
+                 scrambler_seed=None, scramble_target_for_classification=False, lmbda=0.05, no_save=False):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -712,6 +712,7 @@ class DualSupWithCCMMDModel:
             scramble_labels.RandomToyboxScrambler(seed=self.scrambler_seed) if self.scramble_labels else None
         self.scramble_target_for_classification = scramble_target_for_classification
         self.network.cuda()
+        self.no_save = no_save
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
@@ -780,37 +781,37 @@ class DualSupWithCCMMDModel:
                                     src_ce_loss_total / num_batches, trgt_ce_loss_total / num_batches,
                                     ccmmd_loss_total / num_batches,
                                     comb_loss_total / num_batches, time.time() - start_time))
-            
-            writer.add_scalars(
-                main_tag="training_loss",
-                tag_scalar_dict={
-                    'src_ce_loss_ep': src_ce_loss_total / num_batches,
-                    'src_ce_loss_batch': src_loss.item(),
-                    'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
-                    'trgt_ce_loss_batch': trgt_loss.item(),
-                    'ccmmd_loss_ep': ccmmd_loss_total / num_batches,
-                    'ccmmd_loss_batch': ccmmd_loss.item(),
-                    'comb_loss_ep': comb_loss_total / num_batches,
-                    'comb_loss_batch': total_loss.item(),
-                },
-                global_step=total_batches,
-            )
-            writer.add_scalars(
-                main_tag="training_lr",
-                tag_scalar_dict={
-                    'bb': optimizer.param_groups[0]['lr'],
-                    'fc': optimizer.param_groups[1]['lr'],
-                },
-                global_step=total_batches,
-            )
-            writer.add_scalars(
-                main_tag="training",
-                tag_scalar_dict={
-                    'p': p,
-                    'lambda': alfa,
-                },
-                global_step=total_batches,
-            )
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'src_ce_loss_ep': src_ce_loss_total / num_batches,
+                        'src_ce_loss_batch': src_loss.item(),
+                        'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
+                        'trgt_ce_loss_batch': trgt_loss.item(),
+                        'ccmmd_loss_ep': ccmmd_loss_total / num_batches,
+                        'ccmmd_loss_batch': ccmmd_loss.item(),
+                        'comb_loss_ep': comb_loss_total / num_batches,
+                        'comb_loss_batch': total_loss.item(),
+                    },
+                    global_step=total_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'fc': optimizer.param_groups[1]['lr'],
+                    },
+                    global_step=total_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training",
+                    tag_scalar_dict={
+                        'p': p,
+                        'lambda': alfa,
+                    },
+                    global_step=total_batches,
+                )
             if scheduler is not None:
                 scheduler.step()
         
@@ -845,12 +846,13 @@ class DualSupWithCCMMDModel:
             losses.append(total_loss / num_batches)
         self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
                                                                                      loader_names[1], losses[1]))
-        writer.add_scalars(main_tag="val_loss",
-                           tag_scalar_dict={
-                               loader_names[0]: losses[0],
-                               loader_names[1]: losses[1]
-                           },
-                           global_step=ep * steps)
+        if not self.no_save:
+            writer.add_scalars(main_tag="val_loss",
+                               tag_scalar_dict={
+                                   loader_names[0]: losses[0],
+                                   loader_names[1]: losses[1]
+                               },
+                               global_step=ep * steps)
 
     def eval(self, loader, scramble=False):
         """Evaluate the model on the provided dataloader"""
