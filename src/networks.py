@@ -202,6 +202,49 @@ class ResNet18Sup(nn.Module):
                 }
 
 
+class ResNet18SupLargeMargin(nn.Module):
+    """Definition for Supervised network with ResNet18"""
+    
+    def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, margin=3):
+        super().__init__()
+        self.backbone = ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
+        self.backbone_fc_size = self.backbone.fc_size
+        self.num_classes = num_classes
+        self.margin=margin
+        import lsoftmax
+        self.classifier_head = lsoftmax.LSoftmaxLinear(input_features=self.backbone_fc_size,
+                                                       output_features=num_classes, margin=margin,
+                                                       device=torch.device("cuda"))
+        self.classifier_head.reset_parameters()
+    
+    def forward(self, x, target=None):
+        """Forward method"""
+        feats = self.backbone.forward(x)
+        logits = self.classifier_head.forward(feats, target)
+        return logits
+    
+    def set_train(self):
+        """Set network in train mode"""
+        self.backbone.train()
+        self.classifier_head.train()
+    
+    def set_linear_eval(self):
+        """Set backbone in eval and cl in train mode"""
+        self.backbone.eval()
+        self.classifier_head.train()
+    
+    def set_eval(self):
+        """Set network in eval mode"""
+        self.backbone.eval()
+        self.classifier_head.eval()
+    
+    def get_params(self) -> dict:
+        """Return a dictionary of the parameters of the model"""
+        return {'backbone_params': self.backbone.parameters(),
+                'classifier_params': self.classifier_head.parameters(),
+                }
+
+
 class ResNet18Sup12x2(nn.Module):
     """Definition for Supervised network with ResNet18"""
     
