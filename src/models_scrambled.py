@@ -322,7 +322,8 @@ class JANModelWithScrambledTargetClasses:
 class JANModelWithScrambledTargetClassesV2:
     """Module implementing the combined supervised pretraining on source and target"""
     
-    def __init__(self, network, source_loader, target_loader, combined_batch, logger, scrambler_seed=None):
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger, scrambler_seed=None,
+                 no_save=False):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -338,6 +339,7 @@ class JANModelWithScrambledTargetClassesV2:
             thetas=None,
         ).cuda()
         self.jmmd_loss.train()
+        self.no_save = no_save
         
         self.scrambler_seed = scrambler_seed if scrambler_seed is not None else 42
         import scramble_labels
@@ -396,29 +398,29 @@ class JANModelWithScrambledTargetClassesV2:
                                          optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                                          src_ce_loss_total / num_batches, trgt_ce_loss_total / num_batches,
                                          jmmd_loss_total / num_batches, time.time() - start_time))
-            
-            writer.add_scalars(
-                main_tag="training_loss",
-                tag_scalar_dict={
-                    'src_ce_loss_ep': src_ce_loss_total / num_batches,
-                    'src_ce_loss_batch': src_loss.item(),
-                    'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
-                    'trgt_ce_loss_batch': trgt_loss.item(),
-                    'jmmd_loss_ep': jmmd_loss_total / num_batches,
-                    'jmmd_loss_batch': jmmd_loss.item(),
-                    'total_loss_batch': total_loss.item(),
-                },
-                global_step=(ep - 1) * steps + num_batches,
-            )
-            writer.add_scalars(
-                main_tag="training_lr",
-                tag_scalar_dict={
-                    'bb': optimizer.param_groups[0]['lr'],
-                    'fc1': optimizer.param_groups[1]['lr'],
-                    'fc2': optimizer.param_groups[2]['lr'],
-                },
-                global_step=(ep - 1) * steps + num_batches,
-            )
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'src_ce_loss_ep': src_ce_loss_total / num_batches,
+                        'src_ce_loss_batch': src_loss.item(),
+                        'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
+                        'trgt_ce_loss_batch': trgt_loss.item(),
+                        'jmmd_loss_ep': jmmd_loss_total / num_batches,
+                        'jmmd_loss_batch': jmmd_loss.item(),
+                        'total_loss_batch': total_loss.item(),
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'fc1': optimizer.param_groups[1]['lr'],
+                        'fc2': optimizer.param_groups[2]['lr'],
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  SCE: {:.3f}  TCE: {:.3f}  "
                          "JMMD: {:.3f}  "
                          "T: {:.2f}s".format(ep, ep_total, steps, steps,
@@ -449,12 +451,13 @@ class JANModelWithScrambledTargetClassesV2:
             losses.append(total_loss / num_batches)
         self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
                                                                                      loader_names[1], losses[1]))
-        writer.add_scalars(main_tag="val_loss",
-                           tag_scalar_dict={
-                               loader_names[0]: losses[0],
-                               loader_names[1]: losses[1]
-                           },
-                           global_step=ep * steps)
+        if not self.no_save:
+            writer.add_scalars(main_tag="val_loss",
+                               tag_scalar_dict={
+                                   loader_names[0]: losses[0],
+                                   loader_names[1]: losses[1]
+                               },
+                               global_step=ep * steps)
     
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
