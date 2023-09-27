@@ -308,6 +308,70 @@ class ResNet18Sup12x2(nn.Module):
                 }
 
 
+class ResNet18Sup12x2v2(nn.Module):
+    """Definition for Supervised network with ResNet18"""
+    
+    def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, classifier_weights=None):
+        super().__init__()
+        self.backbone = ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
+        self.backbone_fc_size = self.backbone.fc_size
+        self.num_classes = num_classes
+        
+        self.classifier_head_1 = nn.Linear(self.backbone_fc_size, self.num_classes)
+        self.classifier_head_2 = nn.Linear(self.backbone_fc_size, self.num_classes)
+        
+        if classifier_weights is not None:
+            self.classifier_head_1.load_state_dict(classifier_weights)
+        else:
+            self.classifier_head_1.apply(utils.weights_init)
+        self.classifier_head_2.apply(utils.weights_init)
+    
+    def forward(self, x):
+        """Forward method"""
+        feats = self.backbone.forward(x)
+        bsize = x.shape[0]
+        src_size = bsize // 2
+        src_feats, trgt_feats = feats[:src_size], feats[src_size:]
+        return src_feats, trgt_feats, \
+            self.classifier_head_1.forward(src_feats), self.classifier_head_1.forward(trgt_feats),\
+            self.classifier_head_2.forward(src_feats), self.classifier_head_2.forward(trgt_feats)
+    
+    def forward_1(self, x):
+        """Forward method through classifier 1"""
+        feats = self.backbone.forward(x)
+        return feats, self.classifier_head_1.forward(feats)
+    
+    def forward_2(self, x):
+        """Forward method through classifier 2"""
+        feats = self.backbone.forward(x)
+        return feats, self.classifier_head_2.forward(feats)
+    
+    def set_train(self):
+        """Set network in train mode"""
+        self.backbone.train()
+        self.classifier_head_1.train()
+        self.classifier_head_2.train()
+    
+    def set_linear_eval(self):
+        """Set backbone in eval and cl in train mode"""
+        self.backbone.eval()
+        self.classifier_head_1.train()
+        self.classifier_head_2.train()
+    
+    def set_eval(self):
+        """Set network in eval mode"""
+        self.backbone.eval()
+        self.classifier_head_1.eval()
+        self.classifier_head_2.eval()
+    
+    def get_params(self) -> dict:
+        """Return a dictionary of the parameters of the model"""
+        return {'backbone_params': self.backbone.parameters(),
+                'classifier_1_params': self.classifier_head_1.parameters(),
+                'classifier_2_params': self.classifier_head_2.parameters(),
+                }
+
+
 class ResNet18Sup24(nn.Module):
     """Definition for Supervised network with ResNet18 for the 24-class experiments"""
     
