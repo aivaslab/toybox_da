@@ -348,7 +348,7 @@ class DualSupWithJANModel:
                 scrambled_labels = labels.clone()
             with torch.no_grad():
                 _, logits = self.network.forward(images)
-            top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
+            top, pred = utils.calc_accuracy(output=logits, target=scrambled_labels, topk=(1,))
             n_correct += top[0].item() * pred.shape[0]
             n_total += pred.shape[0]
         acc = n_correct / n_total
