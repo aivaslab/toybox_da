@@ -481,6 +481,172 @@ class ToyboxDataset(torchdata.Dataset):
                     row_video = self.train_csvFile[idx_row]['Transformation']
                     assert row_video in self.views
                     self.indicesSelected.append(idx_row)
+
+
+class ToyboxDatasetClass(torchdata.Dataset):
+    """
+    Class for loading Toybox data for classification. The user can specify the number of instances per class
+    and the number of images per class. If number of images per class is -1, all images are selected.
+    """
+    
+    def __init__(self, rng, cl, train=True, transform=None, size=224, hypertune=True, num_images_per_class=-1):
+        
+        self.data_path = TOYBOX_DATA_PATH
+        self.train = train
+        self.transform = transform
+        self.hypertune = hypertune
+        self.size = size
+        self.rng = rng
+        self.num_instances = -1
+        self.num_images_per_class = num_images_per_class
+        self.views = TOYBOX_VIDEOS
+        assert cl in TOYBOX_CLASSES
+        self.cl = cl
+        try:
+            assert os.path.isdir(self.data_path)
+        except AssertionError:
+            raise AssertionError("Data directory not found:", self.data_path)
+        self.label_key = 'Class ID'
+        if self.hypertune:
+            self.trainImagesFile = self.data_path + "toybox_data_interpolated_cropped_dev.pickle"
+            self.trainLabelsFile = self.data_path + "toybox_data_interpolated_cropped_dev.csv"
+            self.testImagesFile = self.data_path + "toybox_data_interpolated_cropped_val.pickle"
+            self.testLabelsFile = self.data_path + "toybox_data_interpolated_cropped_val.csv"
+        else:
+            self.trainImagesFile = self.data_path + "toybox_data_interpolated_cropped_train.pickle"
+            self.trainLabelsFile = self.data_path + "toybox_data_interpolated_cropped_train.csv"
+            self.testImagesFile = self.data_path + "toybox_data_interpolated_cropped_test.pickle"
+            self.testLabelsFile = self.data_path + "toybox_data_interpolated_cropped_test.csv"
+        
+        super().__init__()
+        
+        if self.train:
+            self.indicesSelected = []
+            with open(self.trainImagesFile, "rb") as pickleFile:
+                self.train_data = pickle.load(pickleFile)
+            with open(self.trainLabelsFile, "r") as csvFile:
+                self.train_csvFile = list(csv.DictReader(csvFile))
+            self.set_train_indices()
+            self.verify_train_indices()
+        else:
+            with open(self.testImagesFile, "rb") as pickleFile:
+                self.test_data = pickle.load(pickleFile)
+            with open(self.testLabelsFile, "r") as csvFile:
+                self.test_csvFile = list(csv.DictReader(csvFile))
+    
+    def __len__(self):
+        if self.train:
+            return len(self.indicesSelected)
+        else:
+            return len(self.test_data)
+    
+    def __getitem__(self, index):
+        if self.train:
+            actual_index = self.indicesSelected[index]
+            img = cv2.imdecode(self.train_data[actual_index], 3)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = np.array(img)
+            label = int(self.train_csvFile[actual_index][self.label_key])
+        else:
+            actual_index = index
+            img = cv2.imdecode(self.test_data[index], 3)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = np.array(img)
+            label = int(self.test_csvFile[index][self.label_key])
+        
+        if self.transform is not None:
+            imgs = self.transform(img)
+        else:
+            imgs = img
+        return (index, actual_index), imgs, label
+    
+    def __str__(self):
+        return "Toybox Class Specific"
+    
+    def verify_train_indices(self):
+        """
+        This method verifies that the indices chosen for training has the same number of instances
+        per class as specified in self.num_instances.
+        """
+        unique_objs = {}
+        for idx_selected in self.indicesSelected:
+            cl = self.train_csvFile[idx_selected]['Class']
+            if cl not in unique_objs.keys():
+                unique_objs[cl] = []
+            obj = int(self.train_csvFile[idx_selected]['Object'])
+            if obj not in unique_objs[cl]:
+                unique_objs[cl].append(obj)
+            view = self.train_csvFile[idx_selected]['Transformation']
+            assert view in self.views
+        assert len(unique_objs[self.cl]) == self.num_instances
+        assert len(list(unique_objs.keys())) == 1
+        
+    def get_num_objs(self):
+        """Return the number of objects selected for specified class"""
+        unique_objs = []
+        for idx_selected in self.indicesSelected:
+            obj = int(self.train_csvFile[idx_selected]['Object'])
+            if obj not in unique_objs:
+                unique_objs.append(obj)
+            view = self.train_csvFile[idx_selected]['Transformation']
+            assert view in self.views
+        assert len(unique_objs) == self.num_instances
+        return len(unique_objs)
+    
+    def set_train_indices(self):
+        """
+        This method sets the training indices based on the settings provided in init().
+        """
+        obj_list = []
+        obj_id_dict = {}
+        for row in self.train_csvFile:
+            cl = row['Class']
+            if cl != self.cl:
+                continue
+            obj = int(row['Object'])
+            if obj not in obj_list:
+                obj_list.append(obj)
+                obj_start_id = int(row['Obj Start'])
+                obj_end_id = int(row['Obj End'])
+                obj_id_dict[obj] = (obj_start_id, obj_end_id)
+        
+        self.num_instances = len(obj_list)
+        if self.num_images_per_class < 0:
+            num_images_per_instance = [-1 for _ in range(self.num_instances)]
+        else:
+            num_images_per_instance = [int(self.num_images_per_class / self.num_instances) for _ in
+                                       range(self.num_instances)]
+            remaining = max(0, self.num_images_per_class - num_images_per_instance[0] * self.num_instances)
+            idx_instance = 0
+            while remaining > 0:
+                num_images_per_instance[idx_instance] += 1
+                idx_instance = (idx_instance + 1) % self.num_instances
+                remaining -= 1
+        
+        for idx_obj, obj in enumerate(obj_list):
+            start_row = obj_id_dict[obj][0]
+            end_row = obj_id_dict[obj][1]
+            all_possible_rows = [obj_row for obj_row in range(start_row, end_row + 1)]
+            
+            num_images_obj = len(all_possible_rows)
+            
+            num_required_images = num_images_per_instance[idx_obj]
+            if num_required_images < 0:
+                num_required_images = num_images_obj
+            
+            selected_indices_obj = []
+            while num_required_images >= num_images_obj:
+                selected_indices_obj += all_possible_rows
+                num_required_images -= num_images_obj
+            
+            additional_rows = list(self.rng.choice(all_possible_rows, num_required_images, replace=False))
+            selected_indices_obj += additional_rows
+            
+            for idx_row in selected_indices_obj:
+                assert start_row <= idx_row <= end_row
+                row_video = self.train_csvFile[idx_row]['Transformation']
+                assert row_video in self.views
+                self.indicesSelected.append(idx_row)
     
                     
 class ToyboxDatasetSSL(torchdata.Dataset):
