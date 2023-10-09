@@ -29,11 +29,11 @@ def get_activations_using_hook(args):
         transforms.ToPILImage(),
         transforms.Resize(224),
         transforms.ToTensor(),
-        transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)
+        transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)
     ])
     rng = np.random.default_rng(0)
     for cl in datasets.TOYBOX_CLASSES:
-        dataset = datasets.ToyboxDatasetClass(rng=rng, cl=cl, transform=transform, num_images_per_class=1500)
+        dataset = datasets.DatasetIN12Class(cl=cl, transform=transform)
         dataloader = torchdata.DataLoader(dataset, batch_size=256, shuffle=False, num_workers=4, drop_last=False)
         network.cuda()
         
@@ -46,7 +46,7 @@ def get_activations_using_hook(args):
             activations = networks_hooks.all_activations[k]
             cat_activations = torch.cat(activations, dim=0)
             print(k, cat_activations.shape)
-    
+        networks_hooks.reset_global_data()
 
 
 def test_hooks():

@@ -10,7 +10,13 @@ import utils
 module_names = {}
 all_activations = collections.defaultdict(list)
 
+
+def reset_global_data():
+    """Reset the global data"""
+    global all_activations
+    all_activations = collections.defaultdict(list)
     
+
 def get_act(self, _, outp):
     """Print activations"""
     avgpool_layer = nn.AvgPool2d(kernel_size=outp.shape[-1])
