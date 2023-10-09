@@ -67,6 +67,72 @@ class DatasetIN12All(torchdata.Dataset):
         return "IN12 Supervised All"
 
 
+class DatasetIN12Class(torchdata.Dataset):
+    """
+    This class privides access to IN-12 images for a particular class
+    """
+    
+    def __init__(self, cl, train=True, transform=None, fraction=1.0, hypertune=True):
+        self.cl = cl
+        assert cl in TOYBOX_CLASSES
+        self.train = train
+        self.transform = transform
+        self.root = IN12_DATA_PATH
+        self.fraction = fraction
+        self.hypertune = hypertune
+        
+        if self.train:
+            if self.hypertune:
+                self.images_file = self.root + "dev.pickle"
+                self.labels_file = self.root + "dev.csv"
+            else:
+                self.images_file = self.root + "train.pickle"
+                self.labels_file = self.root + "train.csv"
+        else:
+            if self.hypertune:
+                self.images_file = self.root + "val.pickle"
+                self.labels_file = self.root + "val.csv"
+            else:
+                self.images_file = self.root + "test.pickle"
+                self.labels_file = self.root + "test.csv"
+        
+        self.images = pickle.load(open(self.images_file, "rb"))
+        self.labels = list(csv.DictReader(open(self.labels_file, "r")))
+        if self.train:
+            len_all_images = len(self.images)
+            rng = np.random.default_rng(0)
+            cl_id = TOYBOX_CLASSES.index(self.cl)
+            len_images_class = len_all_images // 12
+            all_indices = np.arange(cl_id * len_images_class, (cl_id + 1) * len_images_class)
+            if self.fraction < 1.0:
+                len_train_images_class = int(self.fraction * len_images_class)
+                sel_indices = rng.choice(all_indices, len_train_images_class, replace=False)
+                self.selected_indices = list(sel_indices)
+            else:
+                self.selected_indices = all_indices
+    
+    def __len__(self):
+        if self.train:
+            return len(self.selected_indices)
+        else:
+            return len(self.images)
+    
+    def __getitem__(self, index):
+        if self.train:
+            item = self.selected_indices[index]
+        else:
+            item = index
+        im = np.array(cv2.imdecode(self.images[item], 3))
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        label = int(self.labels[item]["Class ID"])
+        if self.transform is not None:
+            im = self.transform(im)
+        return (index, item), im, label
+    
+    def __str__(self):
+        return "IN12 Class " + self.cl
+    
+
 class DatasetIN12(torchdata.Dataset):
     """
     This class implements the IN12 dataset
