@@ -1,5 +1,6 @@
 """Module containing the networks with hooks attached to the conv layers"""
 import collections
+import pickle
 
 import torch
 import torch.nn as nn
@@ -11,18 +12,25 @@ module_names = {}
 all_activations = collections.defaultdict(list)
 
 
+def save_global_data(f_path):
+    """Save the global data in the specified file"""
+    fp = open(f_path, "wb")
+    pickle.dump(all_activations, fp)
+    fp.close()
+    
+
 def reset_global_data():
     """Reset the global data"""
     global all_activations
     all_activations = collections.defaultdict(list)
     
-
+    
 def get_act(self, _, outp):
     """Print activations"""
     avgpool_layer = nn.AvgPool2d(kernel_size=outp.shape[-1])
     pooled_output = avgpool_layer.forward(outp).squeeze()
     # print(mods[self], input[0].shape, output.shape, pooled_output.shape)
-    all_activations[module_names[self]].append(pooled_output)
+    all_activations[module_names[self]].append(pooled_output.cpu().numpy())
 
 
 class ResNet18BackboneWithConvActivations(nn.Module):

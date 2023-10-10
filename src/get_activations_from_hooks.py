@@ -25,15 +25,25 @@ def get_activations_using_hook(args):
     network_data = torch.load(fpath)
     backbone_weights = network_data['backbone']
     network = networks_hooks.ResNet18BackboneWithConvActivations(weights=backbone_weights)
-    transform = transforms.Compose([
+    in12_transform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize(224),
         transforms.ToTensor(),
         transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)
     ])
+    tb_transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)
+    ])
     rng = np.random.default_rng(0)
+    
+    out_path = args['dir_path'] + "/activations/from_hooks/"
+    os.makedirs(out_path + "IN-12/", exist_ok=True)
+    os.makedirs(out_path + "Toybox/", exist_ok=True)
     for cl in datasets.TOYBOX_CLASSES:
-        dataset = datasets.DatasetIN12Class(cl=cl, transform=transform)
+        dataset = datasets.DatasetIN12Class(cl=cl, transform=in12_transform)
         dataloader = torchdata.DataLoader(dataset, batch_size=256, shuffle=False, num_workers=4, drop_last=False)
         network.cuda()
         
@@ -44,8 +54,27 @@ def get_activations_using_hook(args):
                 
         for k in networks_hooks.all_activations.keys():
             activations = networks_hooks.all_activations[k]
-            cat_activations = torch.cat(activations, dim=0)
+            cat_activations = np.concatenate(activations, axis=0)
             print(k, cat_activations.shape)
+        act_out_path = out_path + "IN-12/" + str(cl) + ".pkl"
+        networks_hooks.save_global_data(f_path=act_out_path)
+        networks_hooks.reset_global_data()
+
+        dataset = datasets.ToyboxDatasetClass(rng=rng, cl=cl, transform=tb_transform, num_images_per_class=1500)
+        dataloader = torchdata.DataLoader(dataset, batch_size=256, shuffle=False, num_workers=4, drop_last=False)
+        network.cuda()
+
+        for idxs, images, labels in dataloader:
+            images = images.cuda()
+            with torch.no_grad():
+                network(images)
+
+        for k in networks_hooks.all_activations.keys():
+            activations = networks_hooks.all_activations[k]
+            cat_activations = np.concatenate(activations, axis=0)
+            print(k, cat_activations.shape, len(activations), type(activations[0]))
+        act_out_path = out_path + "Toybox/" + str(cl) + ".pkl"
+        networks_hooks.save_global_data(f_path=act_out_path)
         networks_hooks.reset_global_data()
 
 
