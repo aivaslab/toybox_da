@@ -62,6 +62,7 @@ def get_parser():
     parser.add_argument("--pretrained", default=False, action='store_true',
                         help="Use this flag to start from network pretrained on ILSVRC")
     parser.add_argument("--no-save", default=False, action='store_true', help="Set this flag to not save anything")
+    parser.add_argument("--save-freq", default=-1, type=int, help="Frequence for saving model.")
     return vars(parser.parse_args())
 
 
@@ -86,6 +87,7 @@ def main():
     hypertune = not exp_args['final']
     frac = exp_args['fraction']
     no_save = exp_args['no_save']
+    save_freq = exp_args['save_freq']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -172,6 +174,15 @@ def main():
     pre_model.calc_val_loss(loader=src_loader_test, loader_name="in12_test", ep=0, steps=steps, writer=tb_writer,
                             no_save=no_save)
     
+    if not no_save:
+        save_dict = {
+            'type': net.__class__.__name__,
+            'backbone': net.backbone.model.state_dict(),
+            'classifier': net.classifier_head.state_dict(),
+        }
+        fname = "model_epoch_0.pt"
+        torch.save(save_dict, tb_path + fname)
+    
     for ep in range(1, num_epochs + 1):
         pre_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                         ep=ep, ep_total=num_epochs, writer=tb_writer)
@@ -183,6 +194,16 @@ def main():
                                src_test_loader=src_loader_test, trgt_train_loader=trgt_loader_train,
                                trgt_test_loader=trgt_loader_test,
                                writer=tb_writer, step=ep * steps, logger=logger, no_save=no_save)
+
+        if not no_save:
+            if save_freq > 0 and ep % save_freq == 0:
+                save_dict = {
+                    'type': net.__class__.__name__,
+                    'backbone': net.backbone.model.state_dict(),
+                    'classifier': net.classifier_head.state_dict(),
+                }
+                fname = f"model_epoch_{ep}.pt"
+                torch.save(save_dict, tb_path + fname)
 
     pre_model.calc_val_loss(loader=src_loader_test, loader_name="in12_test", ep=num_epochs, steps=steps,
                             writer=tb_writer, no_save=no_save)
