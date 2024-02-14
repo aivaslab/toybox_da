@@ -58,6 +58,7 @@ def get_parser():
                         help="Use this option to specify the directory from which model weights should be loaded")
     parser.add_argument("--pretrained", default=False, action='store_true',
                         help="Use this flag to start from network pretrained on ILSVRC")
+    parser.add_argument("--save-freq", default=-1, type=int, help="Frequence for saving model.")
     return vars(parser.parse_args())
 
 
@@ -82,6 +83,7 @@ def main():
     hypertune = not exp_args['final']
     num_instances = exp_args['instances']
     num_images_per_class = exp_args['images']
+    save_freq = exp_args['save_freq']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -159,6 +161,14 @@ def main():
     get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                        src_test_loader=src_loader_test, trgt_loader=trgt_loader_test,
                        writer=tb_writer, step=0, logger=logger)
+
+    save_dict = {
+        'type': net.__class__.__name__,
+        'backbone': net.backbone.model.state_dict(),
+        'classifier': net.classifier_head.state_dict(),
+    }
+    fname = "model_epoch_0.pt"
+    torch.save(save_dict, tb_path + fname)
     
     for ep in range(1, num_epochs + 1):
         pre_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
@@ -167,6 +177,15 @@ def main():
             get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                src_test_loader=src_loader_test, trgt_loader=trgt_loader_test,
                                writer=tb_writer, step=ep*steps, logger=logger)
+
+        if save_freq > 0 and ep % save_freq == 0:
+            save_dict = {
+                'type': net.__class__.__name__,
+                'backbone': net.backbone.model.state_dict(),
+                'classifier': net.classifier_head.state_dict(),
+            }
+            fname = f"model_epoch_{ep}.pt"
+            torch.save(save_dict, tb_path + fname)
 
     src_tr_acc, src_te_acc, trgt_acc = get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                                           src_test_loader=src_loader_test,
