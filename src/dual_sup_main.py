@@ -67,6 +67,7 @@ def get_parser():
                         help="Use this option to specify the directory from which model weights should be loaded")
     parser.add_argument("--scramble-cl", default=False, action="store_true",
                         help="Use this flag to use scrambled labels for the CE loss for target images")
+    parser.add_argument("--save-freq", default=-1, type=int, help="Save frequence of model")
     return vars(parser.parse_args())
 
 
@@ -94,6 +95,7 @@ def main():
     combined_batch = exp_args['combined_batch']
     target_frac = exp_args['target_frac']
     scramble_cl = exp_args['scramble_cl']
+    save_freq = exp_args['save_freq']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -202,6 +204,14 @@ def main():
                        writer=tb_writer, step=0, logger=logger)
     model.calc_val_loss(ep=0, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
                         loader_names=['tb_test', 'in12_test'])
+
+    save_dict = {
+        'type': net.__class__.__name__,
+        'backbone': net.backbone.model.state_dict(),
+        'classifier': net.classifier_head.state_dict(),
+    }
+    fname = "model_epoch_0.pt"
+    torch.save(save_dict, tb_path + fname)
     
     for ep in range(1, num_epochs + 1):
         model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
@@ -214,6 +224,15 @@ def main():
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,
                                trgt_train_loader=trgt_loader_train, trgt_test_loader=trgt_loader_test,
                                writer=tb_writer, step=ep * steps, logger=logger)
+            
+        if save_freq > 0 and ep % save_freq == 0:
+            save_dict = {
+                'type': net.__class__.__name__,
+                'backbone': net.backbone.model.state_dict(),
+                'classifier': net.classifier_head.state_dict(),
+            }
+            fname = f"model_epoch_{ep}.pt"
+            torch.save(save_dict, tb_path + fname)
     
     src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc = get_train_test_acc(model=model,
                                                                           src_train_loader=src_loader_train,
