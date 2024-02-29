@@ -124,9 +124,9 @@ def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_id
     assert isinstance(act_fnames, list)
     assert len(fnames) == len(act_fnames)
     umap_dict = {}
-    nbrs = [10, 20, 50, 100, 200]
-    min_ds = [0.01, 0.05, 0.1, 0.2]
-    metrics = ['cosine', 'euclidean']
+    nbrs = [200, 300, 500]  # [20, 50, 100, 200]
+    min_ds = [0.1]  # [0.01, 0.05, 0.1, 0.2]
+    metrics = ['euclidean']  # ['cosine', 'euclidean']
     # nbrs = [500]
     # min_ds = [0.05]
     # metrics = ['cosine']
@@ -135,7 +135,7 @@ def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_id
     umap_dict['metrics'] = metrics
     umap_dict["prefix"] = pref
     
-    num_procs = 2
+    num_procs = 4
     umap_settings = []
     for nbr in nbrs:
         for d in min_ds:
@@ -164,6 +164,41 @@ def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_id
     json_file.close()
 
 
+def gen_umap_epochs(model_dir, train_type, num_epochs, save_freq):
+    """Code to generate the umaps for each epoch of training"""
+    try:
+        mp.set_start_method('forkserver')
+    except RuntimeError:
+        pass
+    train_indices_dict = {
+        'toybox_train':   (1, 0, 0, 0),
+        'toybox_only':    (1, 1, 0, 0),
+        'in12_train':     (0, 0, 1, 0),
+        'in12_only':      (0, 0, 1, 1),
+        'train_only':     (1, 0, 1, 0),
+        'all_data':       (1, 1, 1, 1)
+    }
+
+    umap_fnames = ["tb_train", "tb_test", "in12_train", "in12_test"]
+
+    for ep in range(0, num_epochs + 1, save_freq):
+        load_path = model_dir + f"activations_epoch_{ep}/"
+        umap_path = model_dir + f"umap_epoch_{ep}_{train_type}/"
+        activation_fnames = [load_path + "toybox_train_activations.npy", load_path + "toybox_test_activations.npy",
+                             load_path + "in12_train_activations.npy", load_path + "in12_test_activations.npy"]
+
+        index_fnames = [load_path + "toybox_train_indices.npy", load_path + "toybox_test_indices.npy",
+                        load_path + "in12_train_indices.npy", load_path + "in12_test_indices.npy"]
+        for fname in activation_fnames:
+            assert os.path.isfile(fname)
+        for fname in index_fnames:
+            assert os.path.isfile(fname)
+
+        get_umap_from_activations(act_fnames=activation_fnames, idx_fnames=index_fnames, out_path=umap_path,
+                                  fnames=umap_fnames, train_idxs=train_indices_dict[train_type],
+                                  pref=f"umap_epoch_{ep}_{train_type}/umap_")
+
+
 def get_args():
     """Parser with arguments"""
     parser = argparse.ArgumentParser(description="")
@@ -173,22 +208,23 @@ def get_args():
     return vars(parser.parse_args())
 
 
-if __name__ == "__main__":
+def main():
+    """Main method"""
     args = get_args()
     dir_path = args['dir_path']
     load_path = dir_path + "activations/"
     umap_path = dir_path + "umap_" + args['train_type'] + "/"
     train_indices_dict = {
-        'toybox_train':   (1, 0, 0, 0),
-        'toybox_only':    (1, 1, 0, 0),
-        'in12_train':     (0, 0, 1, 0),
-        'in12_only':      (0, 0, 1, 1),
-        'train_only':     (1, 0, 1, 0),
-        'all_data':       (1, 1, 1, 1)
+        'toybox_train': (1, 0, 0, 0),
+        'toybox_only': (1, 1, 0, 0),
+        'in12_train': (0, 0, 1, 0),
+        'in12_only': (0, 0, 1, 1),
+        'train_only': (1, 0, 1, 0),
+        'all_data': (1, 1, 1, 1)
     }
     activation_fnames = [load_path + "toybox_train_activations.npy", load_path + "toybox_test_activations.npy",
                          load_path + "in12_train_activations.npy", load_path + "in12_test_activations.npy"]
-    
+
     index_fnames = [load_path + "toybox_train_indices.npy", load_path + "toybox_test_indices.npy",
                     load_path + "in12_train_indices.npy", load_path + "in12_test_indices.npy"]
     for fname in activation_fnames:
@@ -199,5 +235,9 @@ if __name__ == "__main__":
     umap_fnames = ["tb_train", "tb_test", "in12_train", "in12_test"]
     get_umap_from_activations(act_fnames=activation_fnames, idx_fnames=index_fnames, out_path=umap_path,
                               fnames=umap_fnames, train_idxs=train_indices_dict[args['train_type']],
-                              pref="umap_"+args['train_type']+"/umap_")
+                              pref="umap_" + args['train_type'] + "/umap_")
+
+
+if __name__ == "__main__":
+    main()
     
