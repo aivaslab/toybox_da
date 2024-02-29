@@ -16,8 +16,10 @@ import utils
 
 TEMP_DIR = "../temp/TB_SUP/"
 OUT_DIR = "../out/TB_SUP/"
+OUT_DIR_MIXUP = "../out/TB_SUP_MIXUP/"
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(OUT_DIR, exist_ok=True)
+os.makedirs(OUT_DIR_MIXUP, exist_ok=True)
 
 
 def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_loader, writer: tb.SummaryWriter, step: int,
@@ -59,6 +61,7 @@ def get_parser():
     parser.add_argument("--pretrained", default=False, action='store_true',
                         help="Use this flag to start from network pretrained on ILSVRC")
     parser.add_argument("--save-freq", default=-1, type=int, help="Frequence for saving model.")
+    parser.add_argument("--mixup", default=False, action='store_true', help="Use this flag to use mixup")
     return vars(parser.parse_args())
 
 
@@ -84,9 +87,13 @@ def main():
     num_instances = exp_args['instances']
     num_images_per_class = exp_args['images']
     save_freq = exp_args['save_freq']
+    mixup = exp_args['save_freq']
     
     start_time = datetime.datetime.now()
-    tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
+    if mixup:
+        tb_path = OUT_DIR_MIXUP + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
+    else:
+        tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
     tb_writer = tb.SummaryWriter(log_dir=tb_path)
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt")
     
@@ -172,7 +179,7 @@ def main():
     
     for ep in range(1, num_epochs + 1):
         pre_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
-                        ep=ep, ep_total=num_epochs, writer=tb_writer)
+                        ep=ep, ep_total=num_epochs, writer=tb_writer, mixup=mixup)
         if ep % 20 == 0 and ep != num_epochs:
             get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                src_test_loader=src_loader_test, trgt_loader=trgt_loader_test,

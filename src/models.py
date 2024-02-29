@@ -1,11 +1,13 @@
 """Module implementing the MTL pretraining task for Toybox->IN-12"""
 import time
 import math
+import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.utils.tensorboard as tb
 import torch.nn.functional as func
+import torchvision.transforms as transforms
 
 import utils
 import ccmmd
@@ -408,7 +410,7 @@ class SupModel:
         self.no_save = no_save
         self.network.cuda()
     
-    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
+    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter, mixup: bool = False):
         """Train model"""
         self.network.set_train()
         num_batches = 0
@@ -420,6 +422,9 @@ class SupModel:
             optimizer.zero_grad()
             
             src_idx, src_images, src_labels = self.source_loader.get_next_batch()
+            if mixup:
+                src_labels = func.one_hot(src_labels, num_classes=12)
+                src_images, src_labels = utils.mixup(src_images, src_labels, np.random.beta(0.2, 0.2))
             src_images, src_labels = src_images.cuda(), src_labels.cuda()
             src_logits = self.network.forward(src_images)
             src_loss = src_criterion(src_logits, src_labels)
