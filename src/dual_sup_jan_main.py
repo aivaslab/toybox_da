@@ -69,6 +69,7 @@ def get_parser():
     parser.add_argument("--no-save", default=False, action='store_true', help="Set this flag to not save anything")
     parser.add_argument("--scramble-cl", default=False, action='store_true',
                         help="Set this flag to scramble target labels during training")
+    parser.add_argument("--save-freq", default=-1, type=int, help="Frequency at which model is saved.")
     return vars(parser.parse_args())
 
 
@@ -97,6 +98,7 @@ def main():
     target_frac = exp_args['target_frac']
     no_save = exp_args['no_save']
     scramble_cl = exp_args['scramble_cl']
+    save_freq = exp_args['save_freq']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -195,6 +197,15 @@ def main():
                                                                schedulers=[warmup_scheduler, decay_scheduler],
                                                                milestones=[2 * steps + 1])
     
+    if not no_save and save_freq > 0:
+        save_dict = {
+            'type': net.__class__.__name__,
+            'backbone': net.backbone.model.state_dict(),
+            'classifier': net.classifier_head.state_dict(),
+        }
+        fname = "model_epoch_0.pt"
+        torch.save(save_dict, tb_path + fname)
+    
     get_train_test_acc(model=model, src_train_loader=src_loader_train,
                        src_test_loader=src_loader_test, trgt_train_loader=trgt_loader_train,
                        trgt_test_loader=trgt_loader_test,
@@ -212,6 +223,15 @@ def main():
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,
                                trgt_train_loader=trgt_loader_train, trgt_test_loader=trgt_loader_test,
                                writer=tb_writer, step=ep * steps, logger=logger, no_save=no_save)
+            
+        if not no_save and save_freq > 0 and ep % save_freq == 0:
+            save_dict = {
+                'type': net.__class__.__name__,
+                'backbone': net.backbone.model.state_dict(),
+                'classifier': net.classifier_head.state_dict(),
+            }
+            fname = f"model_epoch_{ep}.pt"
+            torch.save(save_dict, tb_path + fname)
     
     src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc = get_train_test_acc(model=model,
                                                                           src_train_loader=src_loader_train,
