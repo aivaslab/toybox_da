@@ -87,10 +87,15 @@ class Experiment:
                                                   transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)
                                                   ])
         
-        self.train_data = datasets.DatasetIN12(train=True, transform=self.transform_train, fraction=1.0,
-                                               hypertune=self.hypertune)
+        self.train_data = datasets.IN12SSLWithLabels(transform=self.transform_train, fraction=1.0,
+                                                     hypertune=self.hypertune)
         self.train_loader = torchdata.DataLoader(self.train_data, batch_size=self.exp_args['bsize'], shuffle=True,
                                                  num_workers=self.exp_args['workers'], drop_last=True)
+        
+        self.train_data_eval = datasets.DatasetIN12(train=True, fraction=1.0, transform=self.transform_test,
+                                                    hypertune=self.hypertune)
+        self.train_loader_eval = torchdata.DataLoader(self.train_data_eval, batch_size=2*self.exp_args['bsize'],
+                                                      shuffle=False, num_workers=self.exp_args['workers'])
         self.test_data = datasets.DatasetIN12(train=False, transform=self.transform_test, hypertune=self.hypertune)
         self.test_loader = torchdata.DataLoader(self.test_data, batch_size=2 * self.exp_args['bsize'], shuffle=False,
                                                 num_workers=self.exp_args['workers'])
@@ -116,8 +121,8 @@ class Experiment:
         self.model = models_noisy.NoisyModel1(network_pt=self.network_pretrained, network=self.network,
                                               train_loader=self.train_loader, logger=self.logger)
         
-        self.optimizer = torch.optim.Adam(self.network.backbone.parameters(), lr=self.exp_args['lr'],
-                                          weight_decay=self.exp_args['wd'])
+        self.optimizer = torch.optim.SGD(self.network.backbone.parameters(), lr=self.exp_args['lr'],
+                                         weight_decay=self.exp_args['wd'], momentum=0.9, nesterov=True)
         self.optimizer.add_param_group({'params': self.network.classifier_head.parameters(), 'lr': self.exp_args['lr'],
                                         'weight_decay': self.exp_args['wd']})
         
@@ -145,10 +150,10 @@ class Experiment:
         steps = self.exp_args['iters']
         
         get_train_test_acc(model=self.model,
-                           loader_train=self.train_loader, loader_test=self.test_loader,
+                           loader_train=self.train_loader_eval, loader_test=self.test_loader,
                            logger=self.logger, writer=self.tb_writer, step=0, noisy=True)
         get_train_test_acc(model=self.model,
-                           loader_train=self.train_loader, loader_test=self.test_loader,
+                           loader_train=self.train_loader_eval, loader_test=self.test_loader,
                            logger=self.logger, writer=self.tb_writer, step=0, noisy=False)
         
         for ep in range(1, num_epochs + 1):
@@ -156,16 +161,12 @@ class Experiment:
                              ep=ep, ep_total=num_epochs, writer=self.tb_writer)
             if ep % 20 == 0 and ep != num_epochs:
                 get_train_test_acc(model=self.model,
-                                   loader_train=self.train_loader, loader_test=self.test_loader,
+                                   loader_train=self.train_loader_eval, loader_test=self.test_loader,
                                    logger=self.logger, writer=self.tb_writer, step=ep * steps)
-
-        get_train_test_acc(model=self.model,
-                           loader_train=self.train_loader, loader_test=self.test_loader,
-                           logger=self.logger, writer=self.tb_writer, step=0, noisy=True)
         
         acc_train, acc_test = \
             get_train_test_acc(model=self.model,
-                               loader_train=self.train_loader, loader_test=self.test_loader,
+                               loader_train=self.train_loader_eval, loader_test=self.test_loader,
                                logger=self.logger, writer=self.tb_writer, step=num_epochs * steps)
         
         self.exp_args['tb_train'] = acc_train

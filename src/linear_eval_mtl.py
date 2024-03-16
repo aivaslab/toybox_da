@@ -23,7 +23,7 @@ def get_train_test_acc(model, train_loader, test_loader):
 
 def main():
     """Main method"""
-    num_epochs = 5
+    num_epochs = 20
     b_size = 64
     transform_train = transforms.Compose([transforms.ToPILImage(),
                                           transforms.Resize(256),

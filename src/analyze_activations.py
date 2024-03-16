@@ -24,6 +24,8 @@ def analyze_domains(exp_args, layer):
     tb_dir_path = exp_args['dir_path'] + "activations/from_hooks/Toybox/"
     in12_dir_path = exp_args['dir_path'] + "activations/from_hooks/IN-12/"
     img_out_dir = exp_args['dir_path'] + "activations/from_hooks/images/"
+    data_out_dir = exp_args['dir_path'] + "activations/from_hooks/data/"
+    os.makedirs(data_out_dir, exist_ok=True)
     os.makedirs(img_out_dir, exist_ok=True)
     assert os.path.isdir(tb_dir_path) and os.path.isdir(in12_dir_path)
     tb_activations = []
@@ -63,30 +65,36 @@ def analyze_domains(exp_args, layer):
     in12_mean_activations = np.mean(in12_activations, axis=0, keepdims=True)
     all_mean_activations = np.concatenate([tb_mean_activations, in12_mean_activations], axis=0)
     preferred_dom = np.argmax(all_mean_activations, axis=0)
+    
+    np.save(data_out_dir+"preferred_domain.npy", preferred_dom)
     preferred_dom_cntr = collections.Counter(preferred_dom)
     print(preferred_dom_cntr)
     preferred_doms = [preferred_dom_cntr[0], preferred_dom_cntr[1]]
+
+    mean_activations_mins = np.min(all_mean_activations, axis=0, keepdims=True)
+    mean_activations_maxs = np.max(all_mean_activations, axis=0, keepdims=True)
+    selectivities = np.squeeze((mean_activations_maxs - mean_activations_mins) /
+                               (mean_activations_maxs + mean_activations_mins))
+    print(selectivities.shape, np.min(selectivities), np.max(selectivities))
+
+    np.save(data_out_dir+"selectivities.npy", selectivities)
+    print(preferred_dom.shape, selectivities.shape)
+    tb_selectivities = selectivities[preferred_dom == 0]
+    in12_selectivities = selectivities[preferred_dom == 1]
+    # in12_selectivities = np.where(preferred_dom == 1, selectivities)
+    print(tb_selectivities.shape, in12_selectivities.shape)
+    
     fig, ax = plt.subplots(figsize=(8, 9), layout='tight')
     ax.bar(x=np.arange(2), height=preferred_doms, tick_label=DOMAINS)
     ax.set_title("Number of preferred neurons for each category")
     plt.savefig(img_out_dir + "pref_neurons_domain.png")
     plt.close()
     
-    mean_activations_mins = np.min(all_mean_activations, axis=0, keepdims=True)
-    mean_activations_maxs = np.max(all_mean_activations, axis=0, keepdims=True)
-    selectivities = np.squeeze((mean_activations_maxs - mean_activations_mins) /
-                               (mean_activations_maxs + mean_activations_mins))
-    print(selectivities.shape, np.min(selectivities), np.max(selectivities))
     fig, ax = plt.subplots(figsize=(16, 9), layout='tight')
     ax.hist(selectivities, bins=50)
     ax.set_title("Histogram of selectivities in last conv layer for all neurons")
     plt.savefig(img_out_dir + "domain_selectivities_hist.png")
     plt.close()
-    print(preferred_dom.shape, selectivities.shape)
-    tb_selectivities = selectivities[preferred_dom == 0]
-    in12_selectivities = selectivities[preferred_dom == 1]
-    # in12_selectivities = np.where(preferred_dom == 1, selectivities)
-    print(tb_selectivities.shape, in12_selectivities.shape)
 
     fig, ax = plt.subplots(figsize=(16, 9), layout='tight')
     ax.hist(tb_selectivities, bins=50)

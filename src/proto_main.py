@@ -246,6 +246,7 @@ class ProtoPNetTrainer:
         train_acc, test_acc = self.eval()
         print("Train acc: {:.2f}    Test acc: {:.2f}".format(train_acc, test_acc))
         save_dict = {
+            'type': 'ResNet18Proto',
             'backbone': self.network.backbone.model.state_dict(),
             'bottleneck': self.network.bottleneck.state_dict(),
             'classifier': self.network.classifier.state_dict(),

@@ -75,7 +75,60 @@ def get_activations_sup(model_path, out_path):
     print(indices.shape, activations.shape)
     np.save(file=out_path + "in12_test_indices.npy", arr=indices)
     np.save(file=out_path+"in12_test_activations.npy", arr=activations)
+    
 
+def get_activations_office31(out_path):
+    """Get the activations from resnet-18 pretrained model for office-31 dataset"""
+    out_path_office31 = out_path + "office-31/"
+    os.makedirs(out_path_office31, exist_ok=True)
+
+    net = networks.ResNet18Backbone(pretrained=True)
+    fc_size = net.fc_size
+    net.cuda()
+    net.set_eval()
+
+    # Get activations for Office-31 Amazon
+    transform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+                                    transforms.Resize((224, 224)),
+                                    transforms.Normalize(mean=datasets.OFFICE31_AMAZON_MEAN,
+                                                         std=datasets.OFFICE31_AMAZON_STD)
+                                    ])
+
+    train_data = datasets.DatasetOffice31(domain='amazon', transform=transform)
+    print(len(train_data))
+    indices, activations = get_activations(net=net, fc_size=fc_size, data=train_data)
+    print(indices.shape, activations.shape)
+    np.save(file=out_path_office31 + "amazon_activations.npy", arr=activations)
+    np.save(file=out_path_office31 + "amazon_indices.npy", arr=indices)
+
+    # Get activations for Office-31 DSLR
+    transform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+                                    transforms.Resize((224, 224)),
+                                    transforms.Normalize(mean=datasets.OFFICE31_DSLR_MEAN,
+                                                         std=datasets.OFFICE31_DSLR_STD)
+                                    ])
+
+    train_data = datasets.DatasetOffice31(domain='dslr', transform=transform)
+    print(len(train_data))
+    indices, activations = get_activations(net=net, fc_size=fc_size, data=train_data)
+    print(indices.shape, activations.shape)
+    np.save(file=out_path_office31 + "dslr_activations.npy", arr=activations)
+    np.save(file=out_path_office31 + "dslr_indices.npy", arr=indices)
+
+    # Get activations for Office-31 Webcam
+    transform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+                                    transforms.Resize((224, 224)),
+                                    transforms.Normalize(mean=datasets.OFFICE31_WEBCAM_MEAN,
+                                                         std=datasets.OFFICE31_WEBCAM_STD)
+                                    ])
+
+    train_data = datasets.DatasetOffice31(domain='webcam', transform=transform)
+    print(len(train_data))
+    indices, activations = get_activations(net=net, fc_size=fc_size, data=train_data)
+    print(indices.shape, activations.shape)
+    np.save(file=out_path_office31 + "webcam_activations.npy", arr=activations)
+    np.save(file=out_path_office31 + "webcam_indices.npy", arr=indices)
+    
 
 def get_args():
     """Parser with arguments"""

@@ -113,20 +113,23 @@ class PruneEvalModel:
         return tb_tr_acc, tb_te_acc, in12_tr_acc, in12_te_acc
         
 
-def test_prune_eval():
+def test_prune_eval(model_path, ordered_neurons, step_sizes):
     """Test the prune eval model"""
-    model_path = "../ICLR_OUT/DUAL_SUP/exp_Aug_10_2023_21_29/"
-    for num_neurons_pruned in range(0, 513, 256):
-        neurons_pruned = np.arange(num_neurons_pruned)
+    ret_dict = {}
+    for step_size in step_sizes:
+        neurons_pruned = ordered_neurons[:step_size]
         print("-----------------------------------------------------------------")
-        print("Number of neurons pruned: {:d}".format(num_neurons_pruned))
+        print("Number of neurons pruned: {:d}".format(len(neurons_pruned)))
         evaluator = PruneEvalModel(model_dir=model_path, pruned_neurons=neurons_pruned)
-        evaluator.eval()
-        
+        tb_tr_acc, tb_te_acc, in12_tr_acc, in12_te_acc = evaluator.eval()
+        ret_dict[step_size] = (tb_tr_acc, tb_te_acc, in12_tr_acc, in12_te_acc)
         del evaluator
         print("-----------------------------------------------------------------")
     
+    return ret_dict
+
 
 if __name__ == "__main__":
-    test_prune_eval()
+    dir_path = "../ICLR_OUT/DUAL_SUP/exp_Aug_10_2023_21_29/"
+    test_prune_eval(model_path=dir_path, ordered_neurons=np.arange(512), step_sizes=[0, 128, 256, 384, 512])
     

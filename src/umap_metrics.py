@@ -85,11 +85,17 @@ def normalize(path):
     assert norm_ymax == 1.0
 
 
-def get_points(path, dataset, target_cl):
+def get_points(path, dataset, target_cl, norm=True):
     """Get a 2d matrix of datapoints for the given path, dataset and cl"""
-    fname = dataset + "_norm.csv"
+    if norm:
+        fname = dataset + "_norm.csv"
+    else:
+        fname = dataset + ".csv"
     fpath = path + fname
-    assert fname in NORM_UMAP_FILENAMES
+    if norm:
+        assert fname in NORM_UMAP_FILENAMES
+    else:
+        assert fname in UMAP_FILENAMES
     assert os.path.isfile(fpath)
     assert target_cl in TB_CLASSES
     fp = open(fpath, "r")
@@ -221,7 +227,7 @@ def main(p):
 if __name__ == "__main__":
     start_time = time.time()
     for ep in range(0, 101, 10):
-        file_path = f"../out/IN12_SUP/exp_Feb_13_2024_05_20/umap_epoch_{ep}_all_data/umap_300_0.1_euclidean/"
+        file_path = f"../out/DUAL_SUP/TB_IN12/exp_Feb_15_2024_15_18/umap_epoch_{ep}_all_data/umap_300_0.1_euclidean/"
         main(p=file_path)
         
         # dic_fname = file_path + "data/ll.pkl"

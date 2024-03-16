@@ -32,15 +32,15 @@ class NoisyModel1:
         num_batches = 0
         total_batches = (ep - 1) * steps
         ce_loss_total = 0.0
-        src_criterion = nn.CrossEntropyLoss()
+        src_criterion = nn.CrossEntropyLoss(label_smoothing=0.4)
         halfway = steps / 2.0
         start_time = time.time()
         for step in range(1, steps + 1):
             optimizer.zero_grad()
             p = total_batches / (steps * ep_total)
             
-            src_idx, src_images, src_labels = self.train_loader.get_next_batch()
-            src_images, src_labels = src_images.cuda(), src_labels.cuda()
+            src_idx, (src_images, src_images_1), src_labels = self.train_loader.get_next_batch()
+            src_images, src_images_1, src_labels = src_images.cuda(), src_images_1.cuda(), src_labels.cuda()
             
             total_batches += 1
             
@@ -48,13 +48,24 @@ class NoisyModel1:
                 feats_pt, logits_pt = self.network_pt.forward(src_images)
                 _, pred_pt = logits_pt.topk(1, 1, True, True)
                 pred_pt = pred_pt.t()
+                #
+                # feats_pt_1, logits_pt_1 = self.network_pt.forward(src_images_1)
+                # _, pred_pt_1 = logits_pt_1.topk(1, 1, True, True)
+                # pred_pt_1 = pred_pt_1.t()
+                # matches = torch.eq(pred_pt[0], pred_pt_1[0])
+                # print(pred_pt[0].shape, pred_pt_1[0].shape, matches.float().sum().cpu().numpy())
             
             feats, logits = self.network.forward(src_images, step=total_batches)
+            # labels_pred = func.one_hot(pred_pt[0], num_classes=12).float()
             
+            # for i in range(labels_pred.shape[0]):
+            #     if not matches[i]:
+            #         labels_pred[i] = torch.tensor([0.083, 0.083, 0.083, 0.083, 0.083, 0.083,
+            #                                        0.083, 0.083, 0.083, 0.083, 0.083, 0.083], dtype=torch.float).cuda()
             if ep == 1 and step == 1:
                 print(feats.shape, logits.shape, logits_pt.shape, pred_pt[0].shape, pred_pt[0].dtype,
                       src_labels.shape, src_labels.dtype)
-                
+            
             # compute loss wrt labels from pt_model
             src_loss = src_criterion(logits, pred_pt[0])
             
