@@ -60,6 +60,7 @@ def get_parser():
                         help="Use this flag to start from pretrained network")
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--dropout", default=False, action='store_true', help="Use this flag to enable dropout")
     return vars(parser.parse_args())
 
 
@@ -85,6 +86,7 @@ def main():
     num_instances = exp_args['instances']
     num_images_per_class = exp_args['images']
     combined_batch = exp_args['combined_batch']
+    dropout = exp_args['dropout']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -155,6 +157,11 @@ def main():
     
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
+
+    if dropout:
+        model_jan = networks_da.ResNet18JANWithDropout
+    else:
+        model_jan = networks_da.ResNet18JAN
     
     if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
         load_file_path = exp_args['load_path'] + "final_model.pt"
@@ -163,10 +170,10 @@ def main():
         bb_wts = load_file['backbone']
         btlnk_wts = load_file['bottleneck'] if 'bottleneck' in load_file.keys() else None
         cl_wts = load_file['classifier'] if (btlnk_wts is not None and 'classifier' in load_file.keys()) else None
-        net = networks_da.ResNet18JAN(num_classes=12, backbone_weights=bb_wts, bottleneck_weights=btlnk_wts,
-                                      classifier_weights=cl_wts)
+        net = model_jan(num_classes=12, backbone_weights=bb_wts, bottleneck_weights=btlnk_wts,
+                        classifier_weights=cl_wts)
     else:
-        net = networks_da.ResNet18JAN(num_classes=12, pretrained=exp_args['pretrained'])
+        net = model_jan(num_classes=12, pretrained=exp_args['pretrained'])
     
     model = models_da.JANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
                                logger=logger, combined_batch=combined_batch)
