@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as func
 import torch.utils.tensorboard as tb
+from torch.cuda.amp import GradScaler
+from torch import autocast
 
 import tllib.alignment.jan as jan
 import tllib.modules.kernels as kernels
@@ -16,7 +18,7 @@ import utils
 class JANModel:
     """Module implementing the JAN architecture"""
     
-    def __init__(self, network, source_loader, target_loader, combined_batch, logger):
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger, use_amp, no_save=False):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -30,7 +32,12 @@ class JANModel:
         self.jmmd_loss.train()
         self.logger = logger
         self.combined_batch = combined_batch
+        self.use_amp = use_amp
+        self.no_save = no_save
         self.network.cuda()
+
+        if self.use_amp:
+            self.scaler = GradScaler()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
@@ -57,7 +64,11 @@ class JANModel:
             
             if self.combined_batch:
                 comb_images = torch.concat([src_images, trgt_images], dim=0)
-                bb_feats, btl_feats, logits = self.network.forward(comb_images)
+                if self.use_amp:
+                    with autocast(device_type='cuda', dtype=torch.float16):
+                        bb_feats, btl_feats, logits = self.network.forward(comb_images)
+                else:
+                    bb_feats, btl_feats, logits = self.network.forward(comb_images)
                 src_size = src_images.shape[0]
                 src_bb_feats, src_btl_feats, src_logits = bb_feats[:src_size], btl_feats[:src_size], logits[:src_size]
                 trgt_bb_feats, trgt_btl_feats, trgt_logits = \
@@ -65,16 +76,27 @@ class JANModel:
             else:
                 src_bb_feats, src_btl_feats, src_logits = self.network.forward(src_images)
                 trgt_bb_feats, trgt_btl_feats, trgt_logits = self.network.forward(trgt_images)
-                
-            src_loss = src_criterion(src_logits, src_labels)
-            
-            jmmd_loss = self.jmmd_loss(
-                (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
-                (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
-            total_loss = src_loss + alfa * jmmd_loss
-            
-            total_loss.backward()
-            optimizer.step()
+
+            if self.use_amp:
+                with autocast(device_type='cuda', dtype=torch.float16):
+                    src_loss = src_criterion(src_logits, src_labels)
+
+                    jmmd_loss = self.jmmd_loss(
+                        (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
+                        (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
+                    total_loss = src_loss + alfa * jmmd_loss
+                    self.scaler.scale(total_loss).backward()
+                    self.scaler.step(optimizer)
+                    self.scaler.update()
+            else:
+                src_loss = src_criterion(src_logits, src_labels)
+
+                jmmd_loss = self.jmmd_loss(
+                    (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
+                    (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
+                total_loss = src_loss + alfa * jmmd_loss
+                total_loss.backward()
+                optimizer.step()
             
             ce_loss_total += src_loss.item()
             jmmd_loss_total += jmmd_loss.item()
@@ -89,41 +111,41 @@ class JANModel:
                                     optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                                     ce_loss_total / num_batches, jmmd_loss_total / num_batches,
                                     comb_loss_total / num_batches, time.time() - start_time))
-            
-            writer.add_scalars(
-                main_tag="training_loss",
-                tag_scalar_dict={
-                    'ce_loss_ep': ce_loss_total / num_batches,
-                    'ce_loss_batch': src_loss.item(),
-                    'jmmd_loss_ep': jmmd_loss_total / num_batches,
-                    'jmmd_loss_batch': jmmd_loss.item(),
-                    'comb_loss_ep': comb_loss_total / num_batches,
-                    'comb_loss_batch': total_loss.item(),
-                },
-                global_step=total_batches,
-            )
-            writer.add_scalars(
-                main_tag="training_lr",
-                tag_scalar_dict={
-                    'bb': optimizer.param_groups[0]['lr'],
-                    'bottleneck': optimizer.param_groups[1]['lr'],
-                    'fc': optimizer.param_groups[2]['lr'],
-                },
-                global_step=total_batches,
-            )
-            writer.add_scalars(
-                main_tag="training",
-                tag_scalar_dict={
-                    'p': p,
-                    'lambda': alfa,
-                },
-                global_step=total_batches,
-            )
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'ce_loss_ep': ce_loss_total / num_batches,
+                        'ce_loss_batch': src_loss.item(),
+                        'jmmd_loss_ep': jmmd_loss_total / num_batches,
+                        'jmmd_loss_batch': jmmd_loss.item(),
+                        'comb_loss_ep': comb_loss_total / num_batches,
+                        'comb_loss_batch': total_loss.item(),
+                    },
+                    global_step=total_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'bottleneck': optimizer.param_groups[1]['lr'],
+                        'fc': optimizer.param_groups[2]['lr'],
+                    },
+                    global_step=total_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training",
+                    tag_scalar_dict={
+                        'p': p,
+                        'lambda': alfa,
+                    },
+                    global_step=total_batches,
+                )
             if scheduler is not None:
                 scheduler.step()
 
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.4f}  CLR: {:.4f}  CE: {:.4f}  JMMD: {:.4f}  "
-                         "Tot: {:.4f}  T: {:.0f}s".format(
+                         "Tot: {:.4f}  T: {:.2f}s".format(
                             ep, ep_total, steps, steps,
                             optimizer.param_groups[0]['lr'], optimizer.param_groups[2]['lr'],
                             ce_loss_total / num_batches, jmmd_loss_total / num_batches, comb_loss_total / num_batches,
@@ -147,14 +169,14 @@ class JANModel:
             losses.append(total_loss / num_batches)
         self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
                                                                                      loader_names[1], losses[1]))
-    
-        writer.add_scalars(main_tag="val_loss",
-                           tag_scalar_dict={
-                               loader_names[0]: losses[0],
-                               loader_names[1]: losses[1]
-                           },
-                           global_step=ep * steps)
-    
+        if not self.no_save:
+            writer.add_scalars(main_tag="val_loss",
+                               tag_scalar_dict={
+                                   loader_names[0]: losses[0],
+                                   loader_names[1]: losses[1]
+                               },
+                               global_step=ep * steps)
+
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
         n_total = 0
