@@ -88,6 +88,17 @@ class ResNet18JAN(nn.Module):
                 'classifier_params': self.classifier_head.parameters(),
                 }
 
+    def save_model(self, fpath: str):
+        """Save the model"""
+        save_dict = {
+            'type': self.__class__.__name__,
+            'dropout': self.dropout,
+            'backbone': self.backbone.model.state_dict(),
+            'bottleneck': self.bottleneck.state_dict(),
+            'classifier': self.classifier_head.state_dict(),
+        }
+        torch.save(save_dict, fpath)
+
 
 def test():
     """Method to test the models"""
