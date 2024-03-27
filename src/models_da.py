@@ -9,10 +9,8 @@ import torch.utils.tensorboard as tb
 from torch.cuda.amp import GradScaler
 from torch import autocast
 
-import tllib.alignment.jan as jan
-import tllib.modules.kernels as kernels
-
 import utils
+import mmd_util
 
 
 class JANModel:
@@ -22,12 +20,12 @@ class JANModel:
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
-        self.jmmd_loss = jan.JointMultipleKernelMaximumMeanDiscrepancy(
-            kernels=([kernels.GaussianKernel(alpha=2**k) for k in range(-3, 2)],
-                     (kernels.GaussianKernel(sigma=0.92, track_running_stats=False), )
+        self.jmmd_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+            kernels=([mmd_util.GaussianKernel(alpha=2**k, track_running_stats=True) for k in range(-3, 2)],
+                     [mmd_util.GaussianKernel(alpha=2**k, track_running_stats=True) for k in range(-3, 2)],
+                     [mmd_util.GaussianKernel(alpha=2**k, track_running_stats=True) for k in range(-3, 2)],
                      ),
             linear=False,
-            thetas=None,
         ).cuda()
         self.jmmd_loss.train()
         self.logger = logger
@@ -81,9 +79,10 @@ class JANModel:
                 with autocast(device_type='cuda', dtype=torch.float16):
                     src_loss = src_criterion(src_logits, src_labels)
 
-                    jmmd_loss = self.jmmd_loss(
-                        (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
-                        (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
+                    jmmd_loss = self.jmmd_loss((src_bb_feats, src_btl_feats, src_logits),
+                                               (trgt_bb_feats, trgt_btl_feats, trgt_logits))
+                        # (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
+                        # (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
                     total_loss = src_loss + alfa * jmmd_loss
                     self.scaler.scale(total_loss).backward()
                     self.scaler.step(optimizer)
@@ -176,6 +175,7 @@ class JANModel:
                                    loader_names[1]: losses[1]
                                },
                                global_step=ep * steps)
+        return losses
 
     def eval(self, loader):
         """Evaluate the model on the provided dataloader"""
@@ -201,9 +201,9 @@ class DualSupWithJANModel:
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
-        self.jmmd_loss = jan.JointMultipleKernelMaximumMeanDiscrepancy(
-            kernels=([kernels.GaussianKernel(alpha=2 ** k) for k in range(-3, 2)],
-                     (kernels.GaussianKernel(sigma=0.92, track_running_stats=False),)
+        self.jmmd_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+            kernels=([mmd_util.GaussianKernel(alpha=2 ** k) for k in range(-3, 2)],
+                     (mmd_util.GaussianKernel(sigma=0.92, track_running_stats=False),)
                      ),
             linear=False,
             thetas=None,
