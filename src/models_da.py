@@ -152,6 +152,7 @@ class JANModel:
 
     def calc_val_loss(self, loaders, loader_names, ep, steps, writer: tb.SummaryWriter):
         """Calculate loss on provided dataloader"""
+        start_time = time.time()
         self.network.set_eval()
         criterion = nn.CrossEntropyLoss()
         losses = []
@@ -163,11 +164,10 @@ class JANModel:
                 images, labels = images.cuda(), labels.cuda()
                 with torch.no_grad():
                     _, _, logits = self.network.forward(images)
-                loss = criterion(logits, labels)
-                total_loss += loss.item()
+                    loss = criterion(logits, labels)
+                    total_loss += loss.item()
             losses.append(total_loss / num_batches)
-        self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
-                                                                                     loader_names[1], losses[1]))
+
         if not self.no_save:
             writer.add_scalars(main_tag="val_loss",
                                tag_scalar_dict={
@@ -175,6 +175,8 @@ class JANModel:
                                    loader_names[1]: losses[1]
                                },
                                global_step=ep * steps)
+        self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}      T: {:.2f}s".
+                         format(loader_names[0], losses[0], loader_names[1], losses[1], time.time() - start_time))
         return losses
 
     def eval(self, loader):
@@ -191,6 +193,54 @@ class JANModel:
             n_total += pred.shape[0]
         acc = n_correct / n_total
         return round(acc, 2)
+
+    def get_val_loss_dict(self, loader, loader_name):
+        """Calculate loss on provided dataloader"""
+        start_time = time.time()
+        self.network.set_eval()
+        criterion = nn.CrossEntropyLoss(reduction='none')
+        losses_dict = {}
+        num_items = 0
+        total_loss = 0.0
+        for _, (idxs, images, labels) in enumerate(loader):
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                _, _, logits = self.network.forward(images)
+                loss = criterion(logits, labels)
+                for i in range(loss.shape[0]):
+                    total_loss += loss[i].item()
+                    num_items += 1
+                    idx = idxs[1][i].item()
+                    losses_dict[idx] = loss[i].item()
+        avg_loss = total_loss / num_items
+
+        self.logger.info("Validation Loss -- {:s}: {:.2f}     T: {:.2f}s".format(loader_name, avg_loss,
+                                                                                 time.time() - start_time))
+        return losses_dict
+
+    def get_eval_dicts(self, loader, loader_name):
+        """Evaluate the model on the provided dataloader"""
+        start_time = time.time()
+        n_total = 0
+        n_correct = 0
+        labels_dict = {}
+        preds_dict = {}
+        self.network.set_eval()
+        for _, (idxs, images, labels) in enumerate(loader):
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                _, _, logits = self.network.forward(images)
+            top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
+            for i in range(pred.shape[0]):
+                idx = idxs[1][i].item()
+                labels_dict[idx] = labels[i].item()
+                preds_dict[idx] = pred[i].item()
+                n_total += 1
+                n_correct += 1 if labels[i].item() == pred[i].item() else 0
+        acc = 100. * n_correct / n_total
+        self.logger.info("Accuracy -- {:s}: {:.2f}     T: {:.2f}s".format(loader_name, acc,
+                                                                          time.time() - start_time))
+        return labels_dict, preds_dict
 
 
 class DualSupWithJANModel:
