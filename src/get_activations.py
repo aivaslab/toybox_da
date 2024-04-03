@@ -2,6 +2,7 @@
 import numpy as np
 import os
 import argparse
+import gc
 
 import torch
 import torch.utils.data as torchdata
@@ -25,6 +26,7 @@ def get_activations(net, fc_size, data):
             feats = feats.cpu()
         indices[idx] = act_idx
         activations[idx] = feats
+    del images, idx, act_idx, data_loader
     # all_activations = torch.cat([activations, mean_activations], dim=0)
     return indices.numpy(), activations.numpy()
 
@@ -75,6 +77,11 @@ def get_activations_sup(model_path, out_path):
     print(indices.shape, activations.shape)
     np.save(file=out_path + "in12_test_indices.npy", arr=indices)
     np.save(file=out_path+"in12_test_activations.npy", arr=activations)
+
+    del indices, activations, net, load_file
+    del toybox_train_data, toybox_test_data, in12_train_data, in12_test_data
+    gc.collect()
+    torch.cuda.empty_cache()
     
 
 def get_activations_office31(out_path):
