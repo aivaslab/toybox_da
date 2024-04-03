@@ -10,41 +10,44 @@ class ResNet18JAN(nn.Module):
     """Definition for JAN network with ResNet18"""
     
     def __init__(self, pretrained=False, backbone_weights=None, num_classes=12, bottleneck_weights=None,
-                 classifier_weights=None, dropout=0):
+                 classifier_weights=None, dropout=0, p=0.5):
         super().__init__()
         self.backbone = networks.ResNet18Backbone(pretrained=pretrained, weights=backbone_weights)
         self.backbone_fc_size = self.backbone.fc_size
         self.num_classes = num_classes
         self.bottleneck_dim = 256
         self.dropout = dropout
+        self.p = p
 
         if self.dropout == 0:
+            self.backbone_dropout = nn.Identity()
             self.bottleneck = nn.Sequential(
                 nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
                 nn.BatchNorm1d(self.bottleneck_dim),
                 nn.ReLU()
             )
         elif self.dropout == 1:
+            self.backbone_dropout = nn.Dropout(p=self.p)
             self.bottleneck = nn.Sequential(
-                nn.Dropout(0.5),
                 nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
                 nn.BatchNorm1d(self.bottleneck_dim),
                 nn.ReLU()
             )
         elif self.dropout == 2:
+            self.backbone_dropout = nn.Identity()
             self.bottleneck = nn.Sequential(
                 nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
                 nn.BatchNorm1d(self.bottleneck_dim),
                 nn.ReLU(),
-                nn.Dropout(0.5),
+                nn.Dropout(p=self.p),
             )
         else:
+            self.backbone_dropout = nn.Dropout(p=self.p)
             self.bottleneck = nn.Sequential(
-                nn.Dropout(0.5),
                 nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
                 nn.BatchNorm1d(self.bottleneck_dim),
                 nn.ReLU(),
-                nn.Dropout(0.5)
+                nn.Dropout(p=self.p)
             )
         if bottleneck_weights is not None:
             self.bottleneck.load_state_dict(bottleneck_weights)
@@ -60,23 +63,27 @@ class ResNet18JAN(nn.Module):
     def forward(self, x):
         """Forward method"""
         backbone_feats = self.backbone.forward(x)
-        bottleneck_feats = self.bottleneck.forward(backbone_feats)
-        return backbone_feats, bottleneck_feats, self.classifier_head.forward(bottleneck_feats)
+        backbone_drop_feats = self.backbone_dropout.forward(backbone_feats)
+        bottleneck_feats = self.bottleneck.forward(backbone_drop_feats)
+        return backbone_drop_feats, bottleneck_feats, self.classifier_head.forward(bottleneck_feats)
     
     def set_train(self):
         """Set network in train mode"""
         self.backbone.train()
+        self.backbone_dropout.train()
         self.bottleneck.train()
         self.classifier_head.train()
     
     def set_linear_eval(self):
         """Set backbone in eval and cl in train mode"""
         self.backbone.eval()
+        self.backbone_dropout.train()
         self.bottleneck.train()
         self.classifier_head.train()
     
     def set_eval(self):
         """Set network in eval mode"""
+        self.backbone_dropout.eval()
         self.backbone.eval()
         self.bottleneck.eval()
         self.classifier_head.eval()
@@ -84,6 +91,7 @@ class ResNet18JAN(nn.Module):
     def get_params(self) -> dict:
         """Return a dictionary of the parameters of the model"""
         return {'backbone_params': self.backbone.parameters(),
+                'backbone_dropout': self.backbone_dropout.parameters(),
                 'bottleneck_params': self.bottleneck.parameters(),
                 'classifier_params': self.classifier_head.parameters(),
                 }
@@ -94,6 +102,7 @@ class ResNet18JAN(nn.Module):
             'type': self.__class__.__name__,
             'dropout': self.dropout,
             'backbone': self.backbone.model.state_dict(),
+            'backbone_dropout': self.backbone_dropout.state_dict(),
             'bottleneck': self.bottleneck.state_dict(),
             'classifier': self.classifier_head.state_dict(),
         }
