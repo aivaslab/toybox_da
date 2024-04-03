@@ -70,6 +70,8 @@ def get_parser():
     parser.add_argument("--no-save", default=False, action='store_true', help="Use this flag to not save anything")
     parser.add_argument("--mode", default="train", choices=["train", "eval"],
                         help="Use this flag to specify the run mode")
+    parser.add_argument("--p", "-p", default=0.5, type=float, help="Probability of Dropout")
+    parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of saving model")
     return vars(parser.parse_args())
 
 
@@ -200,6 +202,8 @@ def main():
     dropout = exp_args['dropout']
     no_save = exp_args['no_save']
     amp = exp_args['amp']
+    dropout_p = exp_args['p']
+    save_freq = exp_args['save_freq']
     if amp:
         torch.set_float32_matmul_precision('high')
     
@@ -245,7 +249,7 @@ def main():
     
     src_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(), train=False, transform=src_transform_test,
                                            hypertune=hypertune)
-    src_loader_test = torchdata.DataLoader(src_data_test, batch_size=4*b_size, shuffle=False, num_workers=n_workers)
+    src_loader_test = torchdata.DataLoader(src_data_test, batch_size=2*b_size, shuffle=False, num_workers=n_workers)
     
     trgt_transform_train = transforms.Compose([transforms.ToPILImage(),
                                                transforms.Resize((256, 256)),
@@ -268,7 +272,7 @@ def main():
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
     trgt_data_test = datasets.DatasetIN12(train=False, transform=trgt_transform_test, fraction=1.0, hypertune=hypertune)
-    trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=4*b_size, shuffle=False, num_workers=n_workers)
+    trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=2*b_size, shuffle=False, num_workers=n_workers)
     
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
@@ -282,9 +286,10 @@ def main():
         dropout = load_file['dropout'] if 'dropout' in load_file.keys() else dropout
         cl_wts = load_file['classifier'] if (btlnk_wts is not None and 'classifier' in load_file.keys()) else None
         net = networks_da.ResNet18JAN(num_classes=12, backbone_weights=bb_wts, bottleneck_weights=btlnk_wts,
-                                      classifier_weights=cl_wts, dropout=dropout)
+                                      classifier_weights=cl_wts, dropout=dropout, p=dropout_p)
     else:
-        net = networks_da.ResNet18JAN(num_classes=12, pretrained=exp_args['pretrained'], dropout=dropout)
+        net = networks_da.ResNet18JAN(num_classes=12, pretrained=exp_args['pretrained'], dropout=dropout,
+                                      p=dropout_p)
 
     model = models_da.JANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
                                logger=logger, combined_batch=combined_batch, use_amp=amp, no_save=no_save)
@@ -325,6 +330,7 @@ def main():
         best_tb_val_acc = accs['tb_test']
         best_tb_val_acc_ep = 0
         if not no_save:
+            logger.info("Experimental details and results saved to {}".format(tb_path))
             net.save_model(fpath=tb_path+"best_tb_val_acc_model.pt")
 
     val_losses = model.calc_val_loss(ep=0, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
@@ -335,6 +341,9 @@ def main():
         best_tb_val_loss_ep = 0
         if not no_save:
             net.save_model(fpath=tb_path+"best_tb_val_loss_model.pt")
+
+    if not no_save and save_freq > 0:
+        net.save_model(fpath=tb_path+f"model_epoch_0.pt")
 
     for ep in range(1, num_epochs + 1):
         model.train(optimizer=optimizer, scheduler=lr_scheduler, steps=steps,
@@ -360,6 +369,9 @@ def main():
             if not no_save:
                 net.save_model(fpath=tb_path + "best_tb_val_acc_model.pt")
 
+        if not no_save and save_freq > 0 and ep % save_freq == 0:
+            net.save_model(fpath=tb_path + f"model_epoch_{ep}.pt")
+
     accs = get_train_test_acc(model=model, loaders=all_loaders, writer=tb_writer, step=num_epochs * steps,
                               logger=logger, no_save=no_save)
     logger.info(f"Best val loss on tb_test at epoch {best_tb_val_loss_ep} with val "
@@ -369,14 +381,8 @@ def main():
                 f"{best_tb_val_acc}")
     if not no_save:
         tb_writer.close()
-        save_dict = {
-            'type': net.__class__.__name__,
-            'dropout': net.dropout,
-            'backbone': net.backbone.model.state_dict(),
-            'bottleneck': net.bottleneck.state_dict(),
-            'classifier': net.classifier_head.state_dict(),
-        }
-        torch.save(save_dict, tb_path + "final_model.pt")
+        net.save_model(fpath=tb_path + "final_model.pt")
+        net.save_model(fpath=tb_path + f"model_epoch_{num_epochs}.pt")
     
         exp_args['tb_train'] = accs['tb_train']
         exp_args['tb_test'] = accs['tb_test']
