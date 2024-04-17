@@ -33,7 +33,9 @@ def get_activations(net, fc_size, data):
 
 def get_activations_sup(model_path, out_path):
     """Get the activations from a supervised model"""
+    assert os.path.isfile(model_path)
     os.makedirs(out_path, exist_ok=True)
+    print(f"--------------------------------------------------------------------------------\nsrc: {model_path}")
 
     load_file = torch.load(model_path)
     net = networks.ResNet18Backbone(weights=load_file['backbone'], pretrained=False)
@@ -49,32 +51,32 @@ def get_activations_sup(model_path, out_path):
 
     toybox_train_data = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=True, transform=transform_toybox,
                                                hypertune=True, num_instances=-1, num_images_per_class=1500)
-    print(len(toybox_train_data))
     indices, activations = get_activations(net=net, fc_size=fc_size, data=toybox_train_data)
-    print(indices.shape, activations.shape)
+    print(f"dset: {toybox_train_data}  n: {len(toybox_train_data)}  indices: {indices.shape}  activations: "
+          f"{activations.shape}")
     np.save(file=out_path + "toybox_train_activations.npy", arr=activations)
     np.save(file=out_path + "toybox_train_indices.npy", arr=indices)
     toybox_test_data = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=False, transform=transform_toybox,
                                               hypertune=False)
-    print(len(toybox_test_data))
     indices, activations = get_activations(net=net, fc_size=fc_size, data=toybox_test_data)
-    print(indices.shape, activations.shape)
+    print(f"dset: {toybox_test_data}  n: {len(toybox_test_data)}  indices: {indices.shape}  activations: "
+          f"{activations.shape}")
     np.save(file=out_path+"toybox_test_activations.npy", arr=activations)
     np.save(file=out_path + "toybox_test_indices.npy", arr=indices)
 
     transform_in12 = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(), transforms.Resize((224, 224)),
                                          transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
     in12_train_data = datasets.DatasetIN12All(train=True, transform=transform_in12, hypertune=True)
-    print(len(in12_train_data))
     indices, activations = get_activations(net=net, fc_size=fc_size, data=in12_train_data)
-    print(indices.shape, activations.shape)
+    print(f"dset: {in12_train_data}  n: {len(in12_train_data)}  indices: {indices.shape}  activations: "
+          f"{activations.shape}")
     np.save(file=out_path+"in12_train_activations.npy", arr=activations)
     np.save(file=out_path + "in12_train_indices.npy", arr=indices)
 
     in12_test_data = datasets.DatasetIN12All(train=False, transform=transform_in12, hypertune=False)
-    print(len(in12_test_data))
     indices, activations = get_activations(net=net, fc_size=fc_size, data=in12_test_data)
-    print(indices.shape, activations.shape)
+    print(f"dset: {in12_test_data}  n: {len(in12_test_data)}  indices: {indices.shape}  activations: "
+          f"{activations.shape}")
     np.save(file=out_path + "in12_test_indices.npy", arr=indices)
     np.save(file=out_path+"in12_test_activations.npy", arr=activations)
 
@@ -82,7 +84,8 @@ def get_activations_sup(model_path, out_path):
     del toybox_train_data, toybox_test_data, in12_train_data, in12_test_data
     gc.collect()
     torch.cuda.empty_cache()
-    
+    print(f"dest: {out_path}\n--------------------------------------------------------------------------------")
+
 
 def get_activations_office31(out_path):
     """Get the activations from resnet-18 pretrained model for office-31 dataset"""
