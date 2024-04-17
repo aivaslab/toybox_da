@@ -17,6 +17,12 @@ SRC_FILES = {
     'in12_test': "../data/data_12/IN-12/test.csv"
 }
 
+ACT_DIR_FNAMES = {
+    'val_loss': "activations_best_tb_val_loss/",
+    'val_acc':  "activations_best_tb_val_acc/",
+    'final':    "activations_final/"
+}
+
 
 def get_activations(path, dset, cl):
     assert cl in TB_CLASSES
@@ -46,19 +52,21 @@ def get_activations(path, dset, cl):
             ret_arr[cntr] = all_activations[i]
             cntr += 1
     assert cntr == sz
+    src_data_fp.close()
     return ret_arr
 
 
-def get_activations_dicts(model_path, epochs):
+def get_activations_dicts(model_path, keys):
     activation_dicts, mean_dicts, cov_dicts = collections.defaultdict(dict), collections.defaultdict(
         dict), collections.defaultdict(dict)
 
-    for epoch in epochs:
-        activation_dicts[epoch] = {}
-        mean_dicts[epoch] = {}
-        cov_dicts[epoch] = {}
+    for key in keys:
+        activation_dicts[key] = {}
+        mean_dicts[key] = {}
+        cov_dicts[key] = {}
 
-        act_path = model_path + f"activations_epoch_{epoch}/"
+        act_path = model_path + f"activations_epoch_{key}/" if isinstance(key, int) else model_path + \
+            ACT_DIR_FNAMES[key]
         assert os.path.isdir(act_path)
         for dset in ['toybox_train', 'in12_train']:
             for cl in TB_CLASSES:
@@ -66,9 +74,9 @@ def get_activations_dicts(model_path, epochs):
                 act_mean = np.mean(activations, axis=0, keepdims=True)
                 act_cov = np.cov(activations, rowvar=False)
                 assert act_mean.shape == (1, 512) and act_cov.shape == (512, 512)
-                activation_dicts[epoch][(dset, cl)] = activations
-                mean_dicts[epoch][(dset, cl)] = act_mean
-                cov_dicts[epoch][(dset, cl)] = act_cov
+                activation_dicts[key][(dset, cl)] = activations
+                mean_dicts[key][(dset, cl)] = act_mean
+                cov_dicts[key][(dset, cl)] = act_cov
 
     return activation_dicts, mean_dicts, cov_dicts
 
@@ -107,15 +115,15 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2):
     return round(ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean), 2)
 
 
-def get_frechet_arrs(mean_dicts: dict, cov_dicts: dict, epoch: int) -> (np.ndarray, np.ndarray):
+def get_frechet_arrs(mean_dicts: dict, cov_dicts: dict, key: int) -> (np.ndarray, np.ndarray):
     """Method to calculate the between all pairs of clusters"""
     frechet_dict = collections.defaultdict(float)
     for src_dset in ['toybox_train', 'in12_train']:
         for trgt_dset in ['toybox_train', 'in12_train']:
             for src_cl in TB_CLASSES:
-                mu1, sigma1 = mean_dicts[epoch][(src_dset, src_cl)], cov_dicts[epoch][(src_dset, src_cl)]
+                mu1, sigma1 = mean_dicts[key][(src_dset, src_cl)], cov_dicts[key][(src_dset, src_cl)]
                 for trgt_cl in TB_CLASSES:
-                    mu2, sigma2 = mean_dicts[epoch][(trgt_dset, trgt_cl)], cov_dicts[epoch][(trgt_dset, trgt_cl)]
+                    mu2, sigma2 = mean_dicts[key][(trgt_dset, trgt_cl)], cov_dicts[key][(trgt_dset, trgt_cl)]
                     frechet = calculate_frechet_distance(mu1=mu1, sigma1=sigma1, mu2=mu2, sigma2=sigma2)
                     frechet_dict[(src_dset, src_cl, trgt_dset, trgt_cl)] = frechet
 
@@ -187,7 +195,7 @@ class PCAUtil:
         return ve_arr
 
 
-def get_explained_var_arr(activation_dicts, threshold=None, n_components=None):
+def get_explained_var_arr(activation_dicts, key, threshold=None, n_components=None):
     """Method to calculate the explained variance from the source cluster PCA for all target clusters"""
     try:
         assert threshold is not None or n_components is not None
@@ -197,10 +205,10 @@ def get_explained_var_arr(activation_dicts, threshold=None, n_components=None):
     for src_dset in ['toybox_train', 'in12_train']:
         for trgt_dset in ['toybox_train', 'in12_train']:
             for src_cl in TB_CLASSES:
-                src_activations = activation_dicts[100][(src_dset, src_cl)]
+                src_activations = activation_dicts[key][(src_dset, src_cl)]
                 src_pca = PCAUtil(src_activations)
                 for trgt_cl in TB_CLASSES:
-                    trgt_activations = activation_dicts[100][(trgt_dset, trgt_cl)]
+                    trgt_activations = activation_dicts[key][(trgt_dset, trgt_cl)]
                     if threshold is not None:
                         ve_dict[(src_dset, src_cl, trgt_dset, trgt_cl)] = \
                             src_pca.transform_by_threshold(trgt_activations, threshold=threshold)
@@ -212,16 +220,16 @@ def get_explained_var_arr(activation_dicts, threshold=None, n_components=None):
     return covariances
 
 
-def get_aucs_arr(activation_dicts, n_components=None):
+def get_aucs_arr(activation_dicts, key, n_components=None):
     """Method to calculate the explained variance AUC from the source cluster PCA for all target clusters"""
     auc_dict = collections.defaultdict(float)
     for src_dset in ['toybox_train', 'in12_train']:
         for trgt_dset in ['toybox_train', 'in12_train']:
             for src_cl in TB_CLASSES:
-                src_activations = activation_dicts[100][(src_dset, src_cl)]
+                src_activations = activation_dicts[key][(src_dset, src_cl)]
                 src_pca = PCAUtil(src_activations=src_activations, n_components=n_components)
                 for trgt_cl in TB_CLASSES:
-                    trgt_activations = activation_dicts[100][(trgt_dset, trgt_cl)]
+                    trgt_activations = activation_dicts[key][(trgt_dset, trgt_cl)]
                     ve_arr = src_pca.get_explained_variance_ratio_list(trgt_activations=trgt_activations)
                     auc = np.trapz(ve_arr)
                     n_components = src_pca.pca.n_components_
