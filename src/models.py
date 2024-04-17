@@ -410,7 +410,8 @@ class SupModel:
         self.no_save = no_save
         self.network.cuda()
     
-    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter, mixup: bool = False):
+    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter, mixup: bool = False,
+              scaler=None):
         """Train model"""
         self.network.set_train()
         num_batches = 0
@@ -420,7 +421,7 @@ class SupModel:
         start_time = time.time()
         for step in range(1, steps + 1):
             optimizer.zero_grad()
-            
+
             src_idx, src_images, src_labels = self.source_loader.get_next_batch()
             if mixup:
                 src_labels = func.one_hot(src_labels, num_classes=12)
@@ -428,7 +429,7 @@ class SupModel:
             src_images, src_labels = src_images.cuda(), src_labels.cuda()
             src_logits = self.network.forward(src_images)
             src_loss = src_criterion(src_logits, src_labels)
-            
+
             src_loss.backward()
             optimizer.step()
             if scheduler is not None:
@@ -436,7 +437,7 @@ class SupModel:
             
             ce_loss_total += src_loss.item()
             num_batches += 1
-            
+
             if 0 <= step - halfway < 1:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
                     ep, ep_total, step, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
@@ -498,6 +499,54 @@ class SupModel:
                                    loader_name: total_loss/num_batches,
                                },
                                global_step=ep*steps)
+
+    def get_val_loss_dict(self, loader, loader_name):
+        """Calculate loss on provided dataloader"""
+        start_time = time.time()
+        self.network.set_eval()
+        criterion = nn.CrossEntropyLoss(reduction='none')
+        losses_dict = {}
+        num_items = 0
+        total_loss = 0.0
+        for _, (idxs, images, labels) in enumerate(loader):
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                logits = self.network.forward(images)
+                loss = criterion(logits, labels)
+                for i in range(loss.shape[0]):
+                    total_loss += loss[i].item()
+                    num_items += 1
+                    idx = idxs[1][i].item()
+                    losses_dict[idx] = loss[i].item()
+        avg_loss = total_loss / num_items
+
+        self.logger.info("Validation Loss -- {:s}: {:.2f}     T: {:.2f}s".format(loader_name, avg_loss,
+                                                                                 time.time() - start_time))
+        return losses_dict
+
+    def get_eval_dicts(self, loader, loader_name):
+        """Evaluate the model on the provided dataloader"""
+        start_time = time.time()
+        n_total = 0
+        n_correct = 0
+        labels_dict = {}
+        preds_dict = {}
+        self.network.set_eval()
+        for _, (idxs, images, labels) in enumerate(loader):
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                logits = self.network.forward(images)
+            top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
+            for i in range(pred.shape[0]):
+                idx = idxs[1][i].item()
+                labels_dict[idx] = labels[i].item()
+                preds_dict[idx] = pred[i].item()
+                n_total += 1
+                n_correct += 1 if labels[i].item() == pred[i].item() else 0
+        acc = 100. * n_correct / n_total
+        self.logger.info("Accuracy -- {:s}: {:.2f}     T: {:.2f}s".format(loader_name, acc,
+                                                                          time.time() - start_time))
+        return labels_dict, preds_dict
 
 
 class DualSupModel:
