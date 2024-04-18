@@ -64,6 +64,8 @@ def get_parser():
                         help="Use this flag to start from network pretrained on ILSVRC")
     parser.add_argument("--no-save", default=False, action='store_true', help="Set this flag to not save anything")
     parser.add_argument("--save-freq", default=-1, type=int, help="Frequence for saving model.")
+    parser.add_argument("--linear-eval", default=False, action='store_true', help='Set this flag to only train the '
+                                                                                  'classifier head')
     return vars(parser.parse_args())
 
 
@@ -163,6 +165,7 @@ def eval_model(exp_args):
             csv_writer.writerow([key, label, pred, 1 if label == pred else 0, loss])
         csv_fp.close()
 
+
 def main():
     """Main method"""
     
@@ -176,6 +179,7 @@ def main():
     frac = exp_args['fraction']
     no_save = exp_args['no_save']
     save_freq = exp_args['save_freq']
+    linear_eval = exp_args['linear_eval']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
@@ -194,8 +198,8 @@ def main():
     src_transform_train = transforms.Compose([transforms.ToPILImage(),
                                               transforms.Resize((256, 256)),
                                               transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
-                                                                           interpolation=
-                                                                           transforms.InterpolationMode.BICUBIC),
+                                                                           interpolation=transforms.
+                                                                           InterpolationMode.BICUBIC),
                                               transforms.RandomOrder(color_transforms),
                                               transforms.RandomHorizontalFlip(),
                                               transforms.ToTensor(),
@@ -243,11 +247,13 @@ def main():
         net = networks.ResNet18Sup(num_classes=12, backbone_weights=bb_wts, classifier_weights=cl_wts)
     else:
         net = networks.ResNet18Sup(num_classes=12, pretrained=exp_args['pretrained'])
-    pre_model = models.SupModel(network=net, source_loader=src_loader_train, logger=logger, no_save=no_save)
+    pre_model = models.SupModel(network=net, source_loader=src_loader_train, logger=logger, no_save=no_save,
+                                linear_eval=linear_eval)
 
     bb_lr_wt = 0.1 if exp_args['pretrained'] else 1.0
-    optimizer = torch.optim.Adam(net.backbone.parameters(), lr=exp_args['lr']*bb_lr_wt, weight_decay=exp_args['wd'])
-    optimizer.add_param_group({'params': net.classifier_head.parameters(), 'lr': exp_args['lr']})
+    optimizer = torch.optim.Adam(net.classifier_head.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
+    if not linear_eval:
+        optimizer.add_param_group({'params': net.backbone.parameters(), 'lr': exp_args['lr'] * bb_lr_wt})
     
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
                                                          total_iters=2 * steps)

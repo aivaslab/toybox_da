@@ -403,17 +403,28 @@ class SupModelLM:
 class SupModel:
     """Module implementing the supervised pretraining on source"""
     
-    def __init__(self, network, source_loader, logger, no_save=False):
+    def __init__(self, network, source_loader, logger, no_save=False, linear_eval=False):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.logger = logger
         self.no_save = no_save
+        self.linear_eval = linear_eval
         self.network.cuda()
+        if self.linear_eval:
+            self.network.freeze_linear_eval()
+        else:
+            self.network.freeze_train()
+
+        num_params_trainable, num_params = self.network.count_trainable_parameters()
+        self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
     
-    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter, mixup: bool = False,
-              scaler=None):
+    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter, mixup: bool = False):
         """Train model"""
-        self.network.set_train()
+        if self.linear_eval:
+            self.network.set_linear_eval()
+        else:
+            self.network.set_train()
+
         num_batches = 0
         ce_loss_total = 0.0
         src_criterion = nn.CrossEntropyLoss()
@@ -439,8 +450,9 @@ class SupModel:
             num_batches += 1
 
             if 0 <= step - halfway < 1:
-                self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
-                    ep, ep_total, step, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                self.logger.info("Ep: {}/{}  Step: {}/{}  CLR: {:.3f}  BLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
+                    ep, ep_total, step, steps, optimizer.param_groups[0]['lr'],
+                    optimizer.param_groups[1]['lr'] if len(optimizer.param_groups) > 1 else 0.0,
                     ce_loss_total / num_batches, time.time() - start_time))
             if not self.no_save:
                 writer.add_scalars(
@@ -454,13 +466,14 @@ class SupModel:
                 writer.add_scalars(
                     main_tag="training_lr",
                     tag_scalar_dict={
-                        'bb': optimizer.param_groups[0]['lr'],
-                        'fc': optimizer.param_groups[1]['lr'],
+                        'fc': optimizer.param_groups[0]['lr'],
+                        'bb': optimizer.param_groups[1]['lr'] if len(optimizer.param_groups) > 1 else 0.0,
                     },
                     global_step=(ep - 1) * steps + num_batches,
                 )
-        self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
-            ep, ep_total, steps, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+        self.logger.info("Ep: {}/{}  Step: {}/{}  CLR: {:.3f}  BLR: {:.3f}  CE: {:.3f}  T: {:.2f}s".format(
+            ep, ep_total, steps, steps, optimizer.param_groups[0]['lr'],
+            optimizer.param_groups[1]['lr'] if len(optimizer.param_groups) > 1 else 0.0,
             ce_loss_total / num_batches, time.time() - start_time))
     
     def eval(self, loader):

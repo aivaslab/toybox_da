@@ -174,12 +174,41 @@ class ResNet18Sup(nn.Module):
             self.classifier_head.load_state_dict(classifier_weights)
         else:
             self.classifier_head.apply(utils.weights_init)
-    
+
+    def count_trainable_parameters(self):
+        """Count the number of trainable parameters"""
+        num_params = sum(p.numel() for p in self.backbone.parameters())
+        num_params_trainable = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
+        num_params += sum(p.numel() for p in self.classifier_head.parameters())
+        num_params_trainable += sum(p.numel() for p in self.classifier_head.parameters() if p.requires_grad)
+        return num_params_trainable, num_params
+
     def forward(self, x):
         """Forward method"""
         feats = self.backbone.forward(x)
         return self.classifier_head.forward(feats)
-    
+
+    def freeze_train(self):
+        """Unfreeze all weights for training"""
+        for param in self.backbone.parameters():
+            param.requires_grad = True
+        for param in self.classifier_head.parameters():
+            param.requires_grad = True
+
+    def freeze_eval(self):
+        """Freeze all weights for evaluation"""
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        for param in self.classifier_head.parameters():
+            param.requires_grad = False
+
+    def freeze_linear_eval(self):
+        """Freeze all weights for linear eval training"""
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        for param in self.classifier_head.parameters():
+            param.requires_grad = True
+
     def set_train(self):
         """Set network in train mode"""
         self.backbone.train()
