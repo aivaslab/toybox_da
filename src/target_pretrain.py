@@ -97,7 +97,7 @@ def eval_model(exp_args):
                                          transforms.ToTensor(),
                                          transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)])
 
-    trgt_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['seed']), train=True,
+    trgt_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=True,
                                              transform=trgt_transform,
                                              hypertune=hypertune, num_instances=-1,
                                              num_images_per_class=1000,
@@ -106,7 +106,7 @@ def eval_model(exp_args):
     trgt_loader_train = torchdata.DataLoader(trgt_data_train, batch_size=b_size, shuffle=False, num_workers=n_workers)
 
     # Load Toybox Test dataset and dataloader
-    trgt_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(), train=False, transform=trgt_transform,
+    trgt_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=False, transform=trgt_transform,
                                             hypertune=hypertune)
     trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
     logger.info(f"Target Test dataset: {trgt_data_test}  Size: {len(trgt_data_test)}")
@@ -293,19 +293,18 @@ def main():
     pre_model.calc_val_loss(loader=src_loader_test, loader_name="in12_test", ep=num_epochs, steps=steps,
                             writer=tb_writer, no_save=no_save)
     
-    src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc = get_train_test_acc(model=pre_model, loaders=all_loaders,
-                                                                          writer=tb_writer, step=num_epochs * steps,
-                                                                          logger=logger, no_save=no_save)
+    accs = get_train_test_acc(model=pre_model, loaders=all_loaders, writer=tb_writer, step=num_epochs * steps,
+                              logger=logger, no_save=no_save)
     
     if not no_save:
         tb_writer.close()
         net.save_model(fpath=tb_path + f"model_epoch_{num_epochs}.pt")
         net.save_model(fpath=tb_path + f"final_model.pt")
         
-        exp_args['in12_train'] = src_tr_acc
-        exp_args['in12_test'] = src_te_acc
-        exp_args['tb_train'] = trgt_tr_acc
-        exp_args['tb_test'] = trgt_te_acc
+        exp_args['in12_train'] = accs['in12_train']
+        exp_args['in12_test'] = accs['in12_test']
+        exp_args['tb_train'] = accs['tb_train']
+        exp_args['tb_test'] = accs['tb_test']
         exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")
         exp_args['train_transform'] = str(src_transform_train)
         utils.save_args(path=tb_path, args=exp_args)
