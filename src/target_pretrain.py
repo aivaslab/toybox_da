@@ -66,6 +66,7 @@ def get_parser():
     parser.add_argument("--save-freq", default=-1, type=int, help="Frequence for saving model.")
     parser.add_argument("--linear-eval", default=False, action='store_true', help='Set this flag to only train the '
                                                                                   'classifier head')
+    parser.add_argument("--save-dir", default="", type=str, help="Directory to save model in.")
     return vars(parser.parse_args())
 
 
@@ -180,9 +181,12 @@ def main():
     no_save = exp_args['no_save']
     save_freq = exp_args['save_freq']
     linear_eval = exp_args['linear_eval']
+    save_dir = exp_args['save_dir']
     
     start_time = datetime.datetime.now()
-    tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
+    tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
+        OUT_DIR + save_dir + "/"
+    assert not os.path.isdir(tb_path), f"{tb_path} already exists"
     tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
     
