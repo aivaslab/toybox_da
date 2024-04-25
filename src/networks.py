@@ -570,6 +570,28 @@ class ResNet18SSL(nn.Module):
         """Forward using only classifier"""
         feats = self.backbone.forward(x)
         return self.ssl_head.forward(feats)
+
+    def freeze_train(self):
+        """Unfreeze all weights for training"""
+        for param in self.backbone.parameters():
+            param.requires_grad = True
+        for param in self.ssl_head.parameters():
+            param.requires_grad = False
+
+    def freeze_eval(self):
+        """Freeze all weights for eval"""
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        for param in self.ssl_head.parameters():
+            param.requires_grad = False
+
+    def count_trainable_parameters(self):
+        """Count the number of trainable parameters"""
+        num_params = sum(p.numel() for p in self.backbone.parameters())
+        num_params_trainable = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
+        num_params += sum(p.numel() for p in self.ssl_head.parameters())
+        num_params_trainable += sum(p.numel() for p in self.ssl_head.parameters() if p.requires_grad)
+        return num_params_trainable, num_params
     
     def set_train(self):
         """Set network in train mode"""
@@ -586,6 +608,15 @@ class ResNet18SSL(nn.Module):
         return {'backbone_params': self.backbone.parameters(),
                 'ssl_head': self.ssl_head.parameters()
                 }
+
+    def save_model(self, fpath: str):
+        """Save the model"""
+        save_dict = {
+            'type': self.__class__.__name__,
+            'backbone': self.backbone.model.state_dict(),
+            'ssl_head': self.ssl_head.state_dict()
+        }
+        torch.save(save_dict, fpath)
     
     
 class ResNet18MTL(nn.Module):

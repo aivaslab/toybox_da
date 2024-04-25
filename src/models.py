@@ -176,11 +176,16 @@ class MTLModel:
 class SSLModel:
     """Module implementing the SSL method for pretraining the DA model"""
     
-    def __init__(self, network, loader, logger):
+    def __init__(self, network, loader, logger, no_save):
         self.network = network
         self.loader = utils.ForeverDataLoader(loader)
         self.logger = logger
         self.network.cuda()
+        self.network.freeze_train()
+        self.no_save = no_save
+
+        num_params_trainable, num_params = self.network.count_trainable_parameters()
+        self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
@@ -212,23 +217,24 @@ class SSLModel:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
                     ep, ep_total, step, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                     ssl_loss_total / num_batches, time.time() - start_time))
-            
-            writer.add_scalars(
-                main_tag="training_loss",
-                tag_scalar_dict={
-                    'ssl_loss_ep': ssl_loss_total / num_batches,
-                    'ssl_loss_batch': loss.item(),
-                },
-                global_step=(ep - 1) * steps + num_batches,
-            )
-            writer.add_scalars(
-                main_tag="training_lr",
-                tag_scalar_dict={
-                    'bb': optimizer.param_groups[0]['lr'],
-                    'ssl_head': optimizer.param_groups[1]['lr'],
-                },
-                global_step=(ep - 1) * steps + num_batches,
-            )
+
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'ssl_loss_ep': ssl_loss_total / num_batches,
+                        'ssl_loss_batch': loss.item(),
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'ssl_head': optimizer.param_groups[1]['lr'],
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
             ep, ep_total, steps, steps, optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
             ssl_loss_total / num_batches, time.time() - start_time))

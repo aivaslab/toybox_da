@@ -31,17 +31,9 @@ def get_parser():
                         help="Set the log level for the experiment", type=str)
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--no-save", action='store_true', default=False, help="Use this option to disable saving")
     
     return vars(parser.parse_args())
-
-
-def save_args(path, args):
-    """Save the experiment args in json file"""
-    import json
-    json_str = json.dumps(args)
-    out_file = open(path + "exp_args.json", "w")
-    out_file.write(json_str)
-    out_file.close()
 
 
 def main():
@@ -49,6 +41,8 @@ def main():
     exp_args = get_parser()
     steps = exp_args['iters']
     num_epochs = exp_args['epochs']
+    workers = exp_args['workers']
+    no_save = exp_args['no_save']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
     gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
@@ -62,12 +56,13 @@ def main():
                                           transforms.ToTensor(),
                                           transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
     data_train = datasets.DatasetIN12SSL(transform=transform_train, fraction=1.0, hypertune=True)
-    loader_train = torchdata.DataLoader(data_train, batch_size=exp_args['bsize'], shuffle=True, num_workers=4)
+    loader_train = torchdata.DataLoader(data_train, batch_size=exp_args['bsize'], shuffle=True, num_workers=workers,
+                                        pin_memory=True, persistent_workers=True, drop_last=True)
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
-    tb_writer = tb.SummaryWriter(log_dir=tb_path)
-    logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path+"log.txt")
+    tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
+    logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path+"log.txt", no_save=no_save)
     
     # print(utils.online_mean_and_sd(trgt_loader_test))
     
@@ -81,7 +76,7 @@ def main():
         net = networks.ResNet18SSL(backbone_weights=bb_wts, ssl_weights=ssl_wts)
     else:
         net = networks.ResNet18SSL()
-    ssl_model = models.SSLModel(network=net, loader=loader_train, logger=logger)
+    ssl_model = models.SSLModel(network=net, loader=loader_train, logger=logger, no_save=no_save)
     
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
     optimizer.add_param_group({'params': net.ssl_head.parameters(), 'lr': exp_args['lr']})
@@ -96,19 +91,15 @@ def main():
     for ep in range(1, num_epochs + 1):
         ssl_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                         ep=ep, ep_total=num_epochs, writer=tb_writer)
-    
-    save_dict = {
-        'type': net.__class__.__name__,
-        'backbone': net.backbone.model.state_dict(),
-        'ssl_head': net.ssl_head.state_dict()
-    }
-    torch.save(save_dict, tb_path + "final_model.pt")
-    tb_writer.close()
 
-    exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")
-    exp_args['train_transform'] = str(transform_train)
-    save_args(path=tb_path, args=exp_args)
-    logger.info("Experimental details and results saved to {}".format(tb_path))
+    if not no_save:
+        net.save_model(fpath=tb_path+"final_model.pt")
+        tb_writer.close()
+
+        exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")
+        exp_args['train_transform'] = str(transform_train)
+        utils.save_args(path=tb_path, args=exp_args)
+        logger.info("Experimental details and results saved to {}".format(tb_path))
 
 
 if __name__ == "__main__":
