@@ -213,7 +213,8 @@ def main():
     src_data_train = datasets.DatasetIN12(train=True, hypertune=hypertune, fraction=frac, transform=src_transform_train,
                                           equal_div=True)
     logger.info(f"Dataset: {src_data_train}  Size: {len(src_data_train)}")
-    src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers)
+    src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
+                                            pin_memory=True, persistent_workers=True, drop_last=True)
     
     src_transform_test = transforms.Compose([transforms.ToPILImage(),
                                              transforms.Resize((224, 224)),
