@@ -176,13 +176,14 @@ class MTLModel:
 class SSLModel:
     """Module implementing the SSL method for pretraining the DA model"""
     
-    def __init__(self, network, loader, logger, no_save):
+    def __init__(self, network, loader, logger, no_save, decoupled):
         self.network = network
         self.loader = utils.ForeverDataLoader(loader)
         self.logger = logger
         self.network.cuda()
         self.network.freeze_train()
         self.no_save = no_save
+        self.decoupled = decoupled
 
         num_params_trainable, num_params = self.network.count_trainable_parameters()
         self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
@@ -202,9 +203,11 @@ class SSLModel:
             images = torch.cat(images, dim=0)
             images = images.cuda()
             feats = self.network.forward(images)
-            logits, labels = utils.info_nce_loss(features=feats, temp=0.5)
-            loss = criterion(logits, labels)
-            
+            if self.decoupled:
+                loss = utils.decoupled_contrastive_loss(features=feats, temp=0.5)
+            else:
+                logits, labels = utils.info_nce_loss(features=feats, temp=0.5)
+                loss = criterion(logits, labels)
             loss.backward()
             
             optimizer.step()

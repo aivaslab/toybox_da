@@ -61,6 +61,35 @@ class ForeverDataLoader:
         return ret
 
 
+def decoupled_contrastive_loss(features, temp):
+    """Implement the decoupled contrastive loss
+    https://arxiv.org/pdf/2110.06848"""
+    dev = torch.device('cuda:0')
+    batchSize = features.shape[0] / 2
+    labels = torch.cat([torch.arange(batchSize) for _ in range(2)], dim=0)
+    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    labels = labels.to(dev)
+    features = F.normalize(features, dim=1)
+    similarity_matrix = torch.matmul(features, torch.transpose(features, 0, 1))
+
+    # discard the main diagonal from both: labels and similarities matrix
+    mask = torch.eye(labels.shape[0], dtype=torch.bool).to(dev)
+    labels = labels[~mask].view(labels.shape[0], -1).type(torch.uint8)
+    similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+
+    positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+    negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+
+    positives = positives / temp
+    negatives = negatives / temp
+
+    pos_loss = -positives
+    neg_loss = torch.logsumexp(negatives, dim=1, keepdim=True)
+    total_loss = (pos_loss + neg_loss).mean()
+
+    return total_loss
+
+
 def info_nce_loss(features, temp):
     """Implement the info_nce loss"""
     dev = torch.device('cuda:0')
@@ -70,10 +99,12 @@ def info_nce_loss(features, temp):
     labels = labels.to(dev)
     features = F.normalize(features, dim=1)
     similarity_matrix = torch.matmul(features, torch.transpose(features, 0, 1))
+
     # discard the main diagonal from both: labels and similarities matrix
     mask = torch.eye(labels.shape[0], dtype=torch.bool).to(dev)
     labels = labels[~mask].view(labels.shape[0], -1).type(torch.uint8)
     similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+
     positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
     negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
     logits = torch.cat([positives, negatives], dim=1)

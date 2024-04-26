@@ -576,7 +576,7 @@ class ResNet18SSL(nn.Module):
         for param in self.backbone.parameters():
             param.requires_grad = True
         for param in self.ssl_head.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
 
     def freeze_eval(self):
         """Freeze all weights for eval"""
