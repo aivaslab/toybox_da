@@ -20,17 +20,18 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
-def get_train_test_acc(model, src_train_loader, src_test_loader, writer: tb.SummaryWriter, step: int, logger):
+def get_train_test_acc(model, src_train_loader, src_test_loader, writer: tb.SummaryWriter, no_save, step: int, logger):
     """Get train and test accuracy"""
     src_tr_acc = model.eval(loader=src_train_loader)
     src_te_acc = model.eval(loader=src_test_loader)
     logger.info("Train acc: {:.2f}   Test acc: {:.2f}".format(src_tr_acc, src_te_acc))
-    writer.add_scalars(main_tag="Accuracies",
-                       tag_scalar_dict={
-                           'train_acc': src_tr_acc,
-                           'test_acc': src_te_acc,
-                       },
-                       global_step=step)
+    if not no_save:
+        writer.add_scalars(main_tag="Accuracies",
+                           tag_scalar_dict={
+                               'train_acc': src_tr_acc,
+                               'test_acc': src_te_acc,
+                           },
+                           global_step=step)
     return src_tr_acc, src_te_acc
 
 
@@ -40,7 +41,7 @@ def get_parser():
     parser.add_argument("-e", "--epochs", default=50, type=int, help="Number of epochs of training")
     parser.add_argument("-it", "--iters", default=500, type=int, help="Number of training steps per epoch")
     parser.add_argument("-b", "--bsize", default=128, type=int, help="Batch size for training")
-    parser.add_argument("-w", "--workers", default=4, type=int, help="Number of workers for dataloading")
+    parser.add_argument("-w", "--workers", default=4, type=int, help="Number of workers for loading data")
     parser.add_argument("-f", "--final", default=False, action='store_true',
                         help="Use this flag to run experiment on train+val set")
     parser.add_argument("--dataset", choices=['toybox', 'in12'], type=str, help="Choose dataset for linear eval.")
@@ -55,6 +56,7 @@ def get_parser():
                         help="Use this option to specify the directory from which model weights should be loaded")
     parser.add_argument("--pretrained", default=False, action='store_true',
                         help="Use this flag to start from network pretrained on ILSVRC")
+    parser.add_argument("--no-save", default=False, action='store_true', help="Use this flag to not save anything.")
     return vars(parser.parse_args())
 
 
@@ -79,11 +81,12 @@ def main():
     hypertune = not exp_args['final']
     num_instances = exp_args['instances']
     num_images_per_class = exp_args['images']
+    no_save = exp_args['no_save']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
-    tb_writer = tb.SummaryWriter(log_dir=tb_path)
-    logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt")
+    tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
+    logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
     
     prob = 0.2
     color_transforms = [transforms.RandomApply([transforms.ColorJitter(brightness=0.2)], p=prob),
@@ -99,8 +102,8 @@ def main():
         src_transform_train = transforms.Compose([transforms.ToPILImage(),
                                                   transforms.Resize((256, 256)),
                                                   transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
-                                                                               interpolation=
-                                                                               transforms.InterpolationMode.BICUBIC),
+                                                                               interpolation=transforms.
+                                                                               InterpolationMode.BICUBIC),
                                                   transforms.RandomOrder(color_transforms),
                                                   transforms.RandomHorizontalFlip(),
                                                   transforms.ToTensor(),
@@ -130,8 +133,8 @@ def main():
         src_transform_train = transforms.Compose([transforms.ToPILImage(),
                                                   transforms.Resize((256, 256)),
                                                   transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
-                                                                               interpolation=
-                                                                               transforms.InterpolationMode.BICUBIC),
+                                                                               interpolation=transforms.
+                                                                               InterpolationMode.BICUBIC),
                                                   transforms.RandomOrder(color_transforms),
                                                   transforms.RandomHorizontalFlip(),
                                                   transforms.ToTensor(),
@@ -173,39 +176,37 @@ def main():
     
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
                                                          total_iters=2 * steps)
+    assert isinstance(steps, int)
     decay_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=(num_epochs - 2) * steps)
     combined_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer=optimizer,
                                                                schedulers=[warmup_scheduler, decay_scheduler],
                                                                milestones=[2 * steps + 1])
     
     get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
-                       src_test_loader=src_loader_test, writer=tb_writer, step=0, logger=logger)
+                       src_test_loader=src_loader_test, writer=tb_writer, step=0, logger=logger, no_save=no_save)
     
     for ep in range(1, num_epochs + 1):
         pre_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                         ep=ep, ep_total=num_epochs)
         if ep % 20 == 0 and ep != num_epochs:
             get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
-                               src_test_loader=src_loader_test, writer=tb_writer, step=ep * steps, logger=logger)
+                               src_test_loader=src_loader_test, writer=tb_writer, step=ep * steps, logger=logger,
+                               no_save=no_save)
     
     src_tr_acc, src_te_acc = get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                                 src_test_loader=src_loader_test, writer=tb_writer,
-                                                step=num_epochs * steps, logger=logger)
-    
-    tb_writer.close()
-    save_dict = {
-        'type': net.__class__.__name__,
-        'backbone': net.backbone.model.state_dict(),
-        'classifier': net.classifier_head.state_dict(),
-    }
-    torch.save(save_dict, tb_path + "final_model.pt")
-    
-    exp_args['train_acc'] = src_tr_acc
-    exp_args['test_acc'] = src_te_acc
-    exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")
-    exp_args['train_transform'] = str(src_transform_train)
-    save_args(path=tb_path, args=exp_args)
-    logger.info("Experimental details and results saved to {}".format(tb_path))
+                                                step=num_epochs * steps, logger=logger, no_save=no_save)
+
+    if not no_save:
+        tb_writer.close()
+        net.save_model(fpath=tb_path+"final_model.pt")
+
+        exp_args['train_acc'] = src_tr_acc
+        exp_args['test_acc'] = src_te_acc
+        exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")
+        exp_args['train_transform'] = str(src_transform_train)
+        save_args(path=tb_path, args=exp_args)
+        logger.info("Experimental details and results saved to {}".format(tb_path))
 
 
 if __name__ == "__main__":
