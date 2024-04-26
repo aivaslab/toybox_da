@@ -18,41 +18,18 @@ class ResNet18JAN(nn.Module):
         self.bottleneck_dim = 256
         self.dropout = dropout
         self.p = p
-
-        if self.dropout == 0:
-            self.backbone_dropout = nn.Identity()
-            self.bottleneck = nn.Sequential(
-                nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
-                nn.BatchNorm1d(self.bottleneck_dim),
-                nn.ReLU()
-            )
-        elif self.dropout == 1:
-            self.backbone_dropout = nn.Dropout(p=self.p)
-            self.bottleneck = nn.Sequential(
-                nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
-                nn.BatchNorm1d(self.bottleneck_dim),
-                nn.ReLU()
-            )
-        elif self.dropout == 2:
-            self.backbone_dropout = nn.Identity()
-            self.bottleneck = nn.Sequential(
-                nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
-                nn.BatchNorm1d(self.bottleneck_dim),
-                nn.ReLU(),
-                nn.Dropout(p=self.p),
-            )
-        else:
-            self.backbone_dropout = nn.Dropout(p=self.p)
-            self.bottleneck = nn.Sequential(
-                nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
-                nn.BatchNorm1d(self.bottleneck_dim),
-                nn.ReLU(),
-                nn.Dropout(p=self.p)
-            )
+        self.bottleneck = nn.Sequential(
+            nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
+            nn.BatchNorm1d(self.bottleneck_dim),
+            nn.ReLU()
+        )
         if bottleneck_weights is not None:
             self.bottleneck.load_state_dict(bottleneck_weights)
         else:
             self.bottleneck.apply(utils.weights_init)
+
+        self.backbone_dropout = nn.Dropout(p=self.p) if self.dropout in [1, 3] else nn.Identity()
+        self.bottleneck_dropout = nn.Dropout(p=self.p) if self.dropout in [2, 3] else nn.Identity()
         
         self.classifier_head = nn.Linear(self.bottleneck_dim, self.num_classes)
         if classifier_weights is not None:
@@ -65,13 +42,15 @@ class ResNet18JAN(nn.Module):
         backbone_feats = self.backbone.forward(x)
         backbone_drop_feats = self.backbone_dropout.forward(backbone_feats)
         bottleneck_feats = self.bottleneck.forward(backbone_drop_feats)
-        return backbone_drop_feats, bottleneck_feats, self.classifier_head.forward(bottleneck_feats)
+        bottleneck_dropout_feats = self.bottleneck_dropout.forward(bottleneck_feats)
+        return backbone_drop_feats, bottleneck_feats, self.classifier_head.forward(bottleneck_dropout_feats)
     
     def set_train(self):
         """Set network in train mode"""
         self.backbone.train()
         self.backbone_dropout.train()
         self.bottleneck.train()
+        self.bottleneck_dropout.train()
         self.classifier_head.train()
     
     def set_linear_eval(self):
@@ -79,6 +58,7 @@ class ResNet18JAN(nn.Module):
         self.backbone.eval()
         self.backbone_dropout.train()
         self.bottleneck.train()
+        self.bottleneck_dropout.train()
         self.classifier_head.train()
     
     def set_eval(self):
@@ -86,6 +66,7 @@ class ResNet18JAN(nn.Module):
         self.backbone_dropout.eval()
         self.backbone.eval()
         self.bottleneck.eval()
+        self.bottleneck_dropout.eval()
         self.classifier_head.eval()
     
     def get_params(self) -> dict:
@@ -104,6 +85,7 @@ class ResNet18JAN(nn.Module):
             'backbone': self.backbone.model.state_dict(),
             'backbone_dropout': self.backbone_dropout.state_dict(),
             'bottleneck': self.bottleneck.state_dict(),
+            'bottleneck_dropout': self.bottleneck_dropout.state_dict(),
             'classifier': self.classifier_head.state_dict(),
         }
         torch.save(save_dict, fpath)
