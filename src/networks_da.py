@@ -42,8 +42,8 @@ class ResNet18JAN(nn.Module):
         backbone_feats = self.backbone.forward(x)
         backbone_drop_feats = self.backbone_dropout.forward(backbone_feats)
         bottleneck_feats = self.bottleneck.forward(backbone_drop_feats)
-        bottleneck_dropout_feats = self.bottleneck_dropout.forward(bottleneck_feats)
-        return backbone_drop_feats, bottleneck_feats, self.classifier_head.forward(bottleneck_dropout_feats)
+        bottleneck_drop_feats = self.bottleneck_dropout.forward(bottleneck_feats)
+        return backbone_drop_feats, bottleneck_drop_feats, self.classifier_head.forward(bottleneck_drop_feats)
     
     def set_train(self):
         """Set network in train mode"""

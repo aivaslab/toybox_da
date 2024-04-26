@@ -348,14 +348,15 @@ def main():
     for ep in range(1, num_epochs + 1):
         model.train(optimizer=optimizer, scheduler=lr_scheduler, steps=steps,
                     ep=ep, ep_total=num_epochs, writer=tb_writer)
-        val_losses = model.calc_val_loss(ep=ep, steps=steps, writer=tb_writer,
-                                         loaders=[src_loader_test, trgt_loader_test],
-                                         loader_names=['tb_test', 'in12_test'])
-        if val_losses[0] <= best_tb_val_loss:
-            best_tb_val_loss = val_losses[0]
-            best_tb_val_loss_ep = ep
-            if not no_save:
-                net.save_model(fpath=tb_path + "best_tb_val_loss_model.pt")
+        if ep % 5 == 0:
+            val_losses = model.calc_val_loss(ep=ep, steps=steps, writer=tb_writer,
+                                             loaders=[src_loader_test, trgt_loader_test],
+                                             loader_names=['tb_test', 'in12_test'])
+            if val_losses[0] <= best_tb_val_loss:
+                best_tb_val_loss = val_losses[0]
+                best_tb_val_loss_ep = ep
+                if not no_save:
+                    net.save_model(fpath=tb_path + "best_tb_val_loss_model.pt")
 
         if ep % 10 == 0:
             accs = get_train_test_acc(model=model, loaders=all_loaders, writer=tb_writer, step=ep * steps,

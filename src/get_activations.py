@@ -10,9 +10,10 @@ import torchvision.transforms as transforms
 
 import datasets
 import networks
+import networks_da
 
 
-def get_activations(net, fc_size, data):
+def get_activations(net, fc_size, data, jan=False, btlnk=False):
     """Use the data to get activation"""
     len_train_data = len(data)
     data_loader = torchdata.DataLoader(data, batch_size=512, shuffle=False, num_workers=4)
@@ -22,7 +23,13 @@ def get_activations(net, fc_size, data):
     for (idx, act_idx), images, _ in data_loader:
         images = images.cuda()
         with torch.no_grad():
-            feats = net.forward(images)
+            if jan:
+                if btlnk:
+                    _, feats, _ = net.forward(images)
+                else:
+                    feats, _, _ = net.forward(images)
+            else:
+                feats = net.forward(images)
             feats = feats.cpu()
         indices[idx] = act_idx
         activations[idx] = feats
@@ -31,57 +38,57 @@ def get_activations(net, fc_size, data):
     return indices.numpy(), activations.numpy()
 
 
-def get_activations_sup(model_path, out_path):
-    """Get the activations from a supervised model"""
-    assert os.path.isfile(model_path)
-    os.makedirs(out_path, exist_ok=True)
-    print(f"--------------------------------------------------------------------------------\nsrc: {model_path}")
-
-    load_file = torch.load(model_path)
-    net = networks.ResNet18Backbone(weights=load_file['backbone'], pretrained=False)
-    # net = networks.ResNet18Backbone(pretrained=True)
-    fc_size = net.fc_size
-    net.cuda()
-    net.set_eval()
+def get_datasets():
+    """Create and return the datasets as a dictionary"""
+    dsets = {}
 
     transform_toybox = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
                                            transforms.Resize((224, 224)),
                                            transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)
                                            ])
 
-    toybox_train_data = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=True, transform=transform_toybox,
+    dsets['toybox_train'] = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=True, transform=transform_toybox,
                                                hypertune=True, num_instances=-1, num_images_per_class=1500)
-    indices, activations = get_activations(net=net, fc_size=fc_size, data=toybox_train_data)
-    print(f"dset: {toybox_train_data}  n: {len(toybox_train_data)}  indices: {indices.shape}  activations: "
-          f"{activations.shape}")
-    np.save(file=out_path + "toybox_train_activations.npy", arr=activations)
-    np.save(file=out_path + "toybox_train_indices.npy", arr=indices)
-    toybox_test_data = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=False, transform=transform_toybox,
+
+    dsets['toybox_test'] = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=False, transform=transform_toybox,
                                               hypertune=False)
-    indices, activations = get_activations(net=net, fc_size=fc_size, data=toybox_test_data)
-    print(f"dset: {toybox_test_data}  n: {len(toybox_test_data)}  indices: {indices.shape}  activations: "
-          f"{activations.shape}")
-    np.save(file=out_path+"toybox_test_activations.npy", arr=activations)
-    np.save(file=out_path + "toybox_test_indices.npy", arr=indices)
 
     transform_in12 = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(), transforms.Resize((224, 224)),
                                          transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
-    in12_train_data = datasets.DatasetIN12All(train=True, transform=transform_in12, hypertune=True)
-    indices, activations = get_activations(net=net, fc_size=fc_size, data=in12_train_data)
-    print(f"dset: {in12_train_data}  n: {len(in12_train_data)}  indices: {indices.shape}  activations: "
-          f"{activations.shape}")
-    np.save(file=out_path+"in12_train_activations.npy", arr=activations)
-    np.save(file=out_path + "in12_train_indices.npy", arr=indices)
+    dsets['in12_train'] = datasets.DatasetIN12All(train=True, transform=transform_in12, hypertune=True)
+    dsets['in12_test'] = datasets.DatasetIN12All(train=False, transform=transform_in12, hypertune=False)
 
-    in12_test_data = datasets.DatasetIN12All(train=False, transform=transform_in12, hypertune=False)
-    indices, activations = get_activations(net=net, fc_size=fc_size, data=in12_test_data)
-    print(f"dset: {in12_test_data}  n: {len(in12_test_data)}  indices: {indices.shape}  activations: "
-          f"{activations.shape}")
-    np.save(file=out_path + "in12_test_indices.npy", arr=indices)
-    np.save(file=out_path+"in12_test_activations.npy", arr=activations)
+    return dsets
 
-    del indices, activations, net, load_file
-    del toybox_train_data, toybox_test_data, in12_train_data, in12_test_data
+
+def get_activations_sup(model_path, out_path, jan=False, btlnk=False):
+    """Get the activations from a supervised model"""
+    assert os.path.isfile(model_path)
+    os.makedirs(out_path, exist_ok=True)
+    print(f"--------------------------------------------------------------------------------\nsrc: {model_path}")
+
+    load_file = torch.load(model_path)
+    if jan:
+        net = networks_da.ResNet18JAN(backbone_weights=load_file['backbone'],
+                                      bottleneck_weights=load_file['bottleneck'])
+        fc_size = net.backbone_fc_size if not btlnk else net.bottleneck_dim
+    else:
+        net = networks.ResNet18Backbone(weights=load_file['backbone'], pretrained=False)
+        fc_size = net.fc_size
+    # net = networks.ResNet18Backbone(pretrained=True)
+
+    net.cuda()
+    net.set_eval()
+
+    all_datasets = get_datasets()
+    for dset_name, dset in all_datasets.items():
+        indices, activations = get_activations(net=net, fc_size=fc_size, data=dset, jan=jan, btlnk=btlnk)
+        print(f"dset: {dset}  n: {len(dset)}  indices: {indices.shape}  activations: {activations.shape}")
+        fname_prefix = f"{dset_name}_backbone" if not jan or not btlnk else f"{dset_name}_bottleneck_"
+        np.save(file=out_path + f"{fname_prefix}_activations.npy", arr=activations)
+        np.save(file=out_path + f"{fname_prefix}_indices.npy", arr=indices)
+
+    del indices, activations, net, load_file, all_datasets
     gc.collect()
     torch.cuda.empty_cache()
     print(f"dest: {out_path}\n--------------------------------------------------------------------------------")
