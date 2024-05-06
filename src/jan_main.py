@@ -348,7 +348,7 @@ def main():
     for ep in range(1, num_epochs + 1):
         model.train(optimizer=optimizer, scheduler=lr_scheduler, steps=steps,
                     ep=ep, ep_total=num_epochs, writer=tb_writer)
-        if ep % 5 == 0:
+        if ep % 10 == 0:
             val_losses = model.calc_val_loss(ep=ep, steps=steps, writer=tb_writer,
                                              loaders=[src_loader_test, trgt_loader_test],
                                              loader_names=['tb_test', 'in12_test'])
@@ -361,14 +361,16 @@ def main():
         if ep % 10 == 0:
             accs = get_train_test_acc(model=model, loaders=all_loaders, writer=tb_writer, step=ep * steps,
                                       logger=logger, no_save=no_save)
+            if accs['tb_test'] >= best_tb_val_acc:
+                best_tb_val_acc = accs['tb_test']
+                best_tb_val_acc_ep = ep
+                if not no_save:
+                    net.save_model(fpath=tb_path + "best_tb_val_acc_model.pt")
         else:
-            accs = get_train_test_acc(model=model, loaders=val_loaders, writer=tb_writer, step=ep*steps,
-                                      logger=logger, no_save=no_save)
-        if accs['tb_test'] >= best_tb_val_acc:
-            best_tb_val_acc = accs['tb_test']
-            best_tb_val_acc_ep = ep
-            if not no_save:
-                net.save_model(fpath=tb_path + "best_tb_val_acc_model.pt")
+            pass
+            # accs = get_train_test_acc(model=model, loaders=val_loaders, writer=tb_writer, step=ep*steps,
+            #                           logger=logger, no_save=no_save)
+
 
         if not no_save and save_freq > 0 and ep % save_freq == 0:
             net.save_model(fpath=tb_path + f"model_epoch_{ep}.pt")

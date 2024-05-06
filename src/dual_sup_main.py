@@ -68,6 +68,7 @@ def get_parser():
     parser.add_argument("--scramble-cl", default=False, action="store_true",
                         help="Use this flag to use scrambled labels for the CE loss for target images")
     parser.add_argument("--save-freq", default=-1, type=int, help="Save frequence of model")
+    parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
     return vars(parser.parse_args())
 
 
@@ -96,11 +97,14 @@ def main():
     target_frac = exp_args['target_frac']
     scramble_cl = exp_args['scramble_cl']
     save_freq = exp_args['save_freq']
+    save_dir = exp_args['save_dir']
     
     start_time = datetime.datetime.now()
-    tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
+    tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
+        OUT_DIR + "TB_IN12/" + save_dir + "/"
     tb_writer = tb.SummaryWriter(log_dir=tb_path)
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt")
+    logger.info("Experimental details and results saved to {}".format(tb_path))
 
     prob = 0.2
     color_transforms = [transforms.RandomApply([transforms.ColorJitter(brightness=0.2)], p=prob),
