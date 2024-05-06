@@ -20,7 +20,7 @@ SRC_FILES = {
 ACT_DIR_FNAMES = {
     'val_loss': "activations_best_tb_val_loss/",
     'val_acc':  "activations_best_tb_val_acc/",
-    'final':    "activations_final/"
+    'final':    "final_model/"
 }
 
 
@@ -56,7 +56,7 @@ def get_activations(path, dset, cl):
     return ret_arr
 
 
-def get_activations_dicts(model_path, keys):
+def get_activations_dicts(model_path, keys, backbone=True):
     activation_dicts, mean_dicts, cov_dicts = collections.defaultdict(dict), collections.defaultdict(
         dict), collections.defaultdict(dict)
 
@@ -65,8 +65,9 @@ def get_activations_dicts(model_path, keys):
         mean_dicts[key] = {}
         cov_dicts[key] = {}
 
-        act_path = model_path + f"activations_epoch_{key}/" if isinstance(key, int) else model_path + \
+        act_path = model_path + f"model_epoch_{key}/" if isinstance(key, int) else model_path + \
             ACT_DIR_FNAMES[key]
+        act_path += "backbone/activations/" if backbone else "bottleneck/activations/"
         assert os.path.isdir(act_path)
         for dset in ['toybox_train', 'in12_train']:
             for cl in TB_CLASSES:

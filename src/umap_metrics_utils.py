@@ -3,14 +3,10 @@ import os
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
-import hdbscan
 import pandas as pd
 import math
-import heapq
-from matplotlib.lines import Line2D
 import networkx as nx
-from scipy.spatial import ConvexHull, convex_hull_plot_2d
-from sklearn.neighbors import KernelDensity
+from scipy.spatial import ConvexHull
 from scipy import stats
 
 import pickle
@@ -42,7 +38,6 @@ def get_points(path, dataset, target_cl):
     assert target_cl in TB_CLASSES
     fp = open(fpath, "r")
     data = list(csv.DictReader(fp))
-    len_data = len(data)
     idx_key = 'ID' if "tb" in dataset else "Index"
 
     src_data_fpath = SRC_FILES[dataset]
@@ -197,7 +192,7 @@ def compute_kde(path, dataset, target_cl, points):
     kde(path=path, dataset=dataset, target_cl=target_cl, m1=x, m2=y)
     
     
-def get_all_kde(path, dataset, cl, all_points, ll_dict):
+def get_all_kde(dataset, cl, all_points, ll_dict):
     """Get all kde"""
     train_points = all_points[(dataset, cl)]
     train_data = np.array(train_points)
@@ -240,7 +235,7 @@ def main(p):
     hull_areas = np.zeros(shape=(2, 12), dtype=float)
     num_core_points = np.zeros(shape=(2, 12), dtype=int)
     density = np.zeros(shape=(2, 12), dtype=int)
-    for dset in ['tb_train', "in12_train"]:  # , 'tb_test', 'in12_train', 'in12_test']:
+    for dset in ['tb_train', "in12_train"]:  # [, 'tb_test', 'in12_train', 'in12_test']:
         for tb_cl in TB_CLASSES:
             datapoints = get_points(path=p, dataset=dset, target_cl=tb_cl)
             datapoints_dict[(dset, tb_cl)] = datapoints
@@ -267,7 +262,7 @@ def main(p):
 
     for dset in ['tb_train', 'in12_train']:
         for tb_cl in TB_CLASSES:
-            likelihood_dict = get_all_kde(path=p, dataset=dset, cl=tb_cl,
+            likelihood_dict = get_all_kde(dataset=dset, cl=tb_cl,
                                           all_points=datapoints_dict, ll_dict=likelihood_dict)
 
     print(len(list(likelihood_dict.keys())))
@@ -352,10 +347,10 @@ if __name__ == "__main__":
     main(p=file_path)
     
     dic_fname = file_path + "data/ll.pkl"
-    data_path = file_path + "data/"
+    dpath = file_path + "data/"
     dic_fp = open(dic_fname, "rb")
     ll_dic = pickle.load(dic_fp)
-    make_ll_tbl(save_path=data_path, dic=ll_dic)
+    make_ll_tbl(save_path=dpath, dic=ll_dic)
     dic_fp.close()
     print(file_path)
     
@@ -365,10 +360,10 @@ if __name__ == "__main__":
     main(p=file_path)
 
     dic_fname = file_path + "data/ll.pkl"
-    data_path = file_path + "data/"
+    dpath = file_path + "data/"
     dic_fp = open(dic_fname, "rb")
     ll_dic = pickle.load(dic_fp)
-    make_ll_tbl(save_path=data_path, dic=ll_dic)
+    make_ll_tbl(save_path=dpath, dic=ll_dic)
     dic_fp.close()
 
     print(file_path)

@@ -48,10 +48,10 @@ def get_datasets():
                                            ])
 
     dsets['toybox_train'] = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=True, transform=transform_toybox,
-                                               hypertune=True, num_instances=-1, num_images_per_class=1500)
+                                                   hypertune=True, num_instances=-1, num_images_per_class=1500)
 
     dsets['toybox_test'] = datasets.ToyboxDataset(rng=np.random.default_rng(0), train=False, transform=transform_toybox,
-                                              hypertune=False)
+                                                  hypertune=False)
 
     transform_in12 = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(), transforms.Resize((224, 224)),
                                          transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
@@ -64,6 +64,7 @@ def get_datasets():
 def get_activations_sup(model_path, out_path, jan=False, btlnk=False):
     """Get the activations from a supervised model"""
     assert os.path.isfile(model_path)
+    out_path += "backbone/activations/" if not jan or not btlnk else "bottleneck/activations/"
     os.makedirs(out_path, exist_ok=True)
     print(f"--------------------------------------------------------------------------------\nsrc: {model_path}")
 
@@ -84,9 +85,8 @@ def get_activations_sup(model_path, out_path, jan=False, btlnk=False):
     for dset_name, dset in all_datasets.items():
         indices, activations = get_activations(net=net, fc_size=fc_size, data=dset, jan=jan, btlnk=btlnk)
         print(f"dset: {dset}  n: {len(dset)}  indices: {indices.shape}  activations: {activations.shape}")
-        fname_prefix = f"{dset_name}_backbone" if not jan or not btlnk else f"{dset_name}_bottleneck_"
-        np.save(file=out_path + f"{fname_prefix}_activations.npy", arr=activations)
-        np.save(file=out_path + f"{fname_prefix}_indices.npy", arr=indices)
+        np.save(file=out_path + f"{dset_name}_activations.npy", arr=activations)
+        np.save(file=out_path + f"{dset_name}_indices.npy", arr=indices)
 
     del indices, activations, net, load_file, all_datasets
     gc.collect()

@@ -108,7 +108,7 @@ def umap_func(act_fnames, idx_fnames, out_path, fnames, nbr, d, metric, train_id
             embedding = reducer.transform(act)
         
         csv_file_name = umap_out_path + fnames[i].split(".")[0] + ".csv"
-        print(csv_file_name, time.time() - start_time, os.getpid(), len(embedding), len(indices))
+        print(f"{csv_file_name}, {time.time() - start_time:.1f}, {os.getpid()}, {len(embedding)}, {len(indices)}")
         start_time = time.time()
         
         csv_file = open(csv_file_name, "w")
@@ -162,6 +162,40 @@ def get_umap_from_activations(act_fnames, idx_fnames, out_path, fnames, train_id
     json_file = open(json_path, "w")
     json.dump(umap_dict, json_file)
     json_file.close()
+
+
+def gen_umap_final(model_dir, train_type):
+    """Code to generate the umaps for each epoch of training"""
+    try:
+        mp.set_start_method('forkserver')
+    except RuntimeError:
+        pass
+    train_indices_dict = {
+        'toybox_train':   (1, 0, 0, 0),
+        'toybox_only':    (1, 1, 0, 0),
+        'in12_train':     (0, 0, 1, 0),
+        'in12_only':      (0, 0, 1, 1),
+        'train_only':     (1, 0, 1, 0),
+        'all_data':       (1, 1, 1, 1)
+    }
+
+    umap_fnames = ["tb_train", "tb_test", "in12_train", "in12_test"]
+
+    load_path = model_dir + f"activations/"
+    umap_path = model_dir + f"umap/{train_type}/"
+    activation_fnames = [load_path + "toybox_train_activations.npy", load_path + "toybox_test_activations.npy",
+                         load_path + "in12_train_activations.npy", load_path + "in12_test_activations.npy"]
+
+    index_fnames = [load_path + "toybox_train_indices.npy", load_path + "toybox_test_indices.npy",
+                    load_path + "in12_train_indices.npy", load_path + "in12_test_indices.npy"]
+    for fname in activation_fnames:
+        assert os.path.isfile(fname), f"{fname} does not exist"
+    for fname in index_fnames:
+        assert os.path.isfile(fname), f"{fname} does not exist"
+
+    get_umap_from_activations(act_fnames=activation_fnames, idx_fnames=index_fnames, out_path=umap_path,
+                              fnames=umap_fnames, train_idxs=train_indices_dict[train_type],
+                              pref=f"{train_type}/umap_")
 
 
 def gen_umap_epochs(model_dir, train_type, num_epochs, save_freq):
