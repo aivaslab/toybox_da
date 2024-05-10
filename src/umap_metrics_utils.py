@@ -29,11 +29,16 @@ for k, val in SRC_FILES.items():
     assert os.path.isfile(val)
 
 
-def get_points(path, dataset, target_cl):
+def get_points(path, dataset, target_cl, norm=True):
     """Get a 2d matrix of datapoints for the given path, dataset and cl"""
-    fname = dataset + "_norm.csv"
+    if norm:
+        fname = dataset + "_norm.csv"
+        assert fname in NORM_UMAP_FILENAMES
+    else:
+        fname = dataset + ".csv"
+        assert fname in UMAP_FILENAMES
     fpath = path + fname
-    assert fname in NORM_UMAP_FILENAMES
+
     assert os.path.isfile(fpath)
     assert target_cl in TB_CLASSES
     fp = open(fpath, "r")
@@ -53,7 +58,7 @@ def get_points(path, dataset, target_cl):
         if src_cl == target_cl:
             ret_data.append([x, y])
     ret_data_np = np.array(ret_data)
-    print(dataset, target_cl, ret_data_np.shape)
+    # print(dataset, target_cl, ret_data_np.shape)
     fp.close()
     src_data_fp.close()
     return ret_data_np
@@ -111,7 +116,7 @@ def build_and_compute_mst(path, dataset, target_cl, points):
         dist = math.sqrt((points[u][0] - points[v][0]) ** 2 + (points[u][1] - points[v][1]) ** 2)
         if dist > threshold:
             removed_edges.append(edge)
-    print(len(removed_edges))
+    # print(len(removed_edges))
     for e in removed_edges:
         mst.remove_edge(e[0], e[1])
     
@@ -162,7 +167,7 @@ def get_intersection(hull_1, hull_2):
     poly1, poly2 = np.array(hull_1), np.array(hull_2)
     clip = PolygonClipper(warn_if_empty=True)
     clipped_poly = clip(poly1, poly2)
-    print(poly1.shape, poly2.shape, clipped_poly.shape)
+    # print(poly1.shape, poly2.shape, clipped_poly.shape)
 
 
 def kde(path, dataset, target_cl, m1, m2):
@@ -215,7 +220,7 @@ def get_all_kde(dataset, cl, all_points, ll_dict):
             eval_data = np.array(eval_points)  # np.vstack([eval_x, eval_y])
             eval_likelihood = kernel.score_samples(eval_data)
             ll_dict[(dataset, cl, eval_dset, eval_cl)] = eval_likelihood
-    print(dataset, cl, time.time() - st_time)
+    # print(dataset, cl, time.time() - st_time)
     return ll_dict
     
 
@@ -225,7 +230,7 @@ def preprocess(path):
     umap_preprocess_for_metrics.generate_scatter_plots(path=path)
     
     
-def main(p):
+def main(p, norm=True):
     """Main method"""
     preprocess(path=p)
     datapoints_dict = {}
@@ -237,7 +242,7 @@ def main(p):
     density = np.zeros(shape=(2, 12), dtype=int)
     for dset in ['tb_train', "in12_train"]:  # [, 'tb_test', 'in12_train', 'in12_test']:
         for tb_cl in TB_CLASSES:
-            datapoints = get_points(path=p, dataset=dset, target_cl=tb_cl)
+            datapoints = get_points(path=p, dataset=dset, target_cl=tb_cl, norm=norm)
             datapoints_dict[(dset, tb_cl)] = datapoints
             plot_points(path=p, dataset=dset, target_cl=tb_cl, points=datapoints)
             core_point_idxs = build_and_compute_mst(path=p, dataset=dset, target_cl=tb_cl, points=datapoints)
@@ -265,14 +270,14 @@ def main(p):
             likelihood_dict = get_all_kde(dataset=dset, cl=tb_cl,
                                           all_points=datapoints_dict, ll_dict=likelihood_dict)
 
-    print(len(list(likelihood_dict.keys())))
+    # print(len(list(likelihood_dict.keys())))
 
     data_path = p + "/data/"
 
     os.makedirs(data_path, exist_ok=True)
-    datapoints_fname = data_path + "datapoints.pkl"
-    corepoints_fname = data_path + "corepoints.pkl"
-    hullpoints_fname = data_path + "hullpoints.pkl"
+    datapoints_fname = data_path + "datapoints.pkl" if not norm else data_path + "datapoints_norm.pkl"
+    corepoints_fname = data_path + "corepoints.pkl" if not norm else data_path + "corepoints_norm.pkl"
+    hullpoints_fname = data_path + "hullpoints.pkl" if not norm else data_path + "hullpoints_norm.pkl"
     datapoints_fp = open(datapoints_fname, "wb")
     corepoints_fp = open(corepoints_fname, "wb")
     hullpoints_fp = open(hullpoints_fname, "wb")
@@ -283,26 +288,48 @@ def main(p):
     hullpoints_fp.close()
     datapoints_fp.close()
 
-    ll_fname = data_path + "ll.pkl"
+    if norm:
+        ll_fname = data_path + "ll_norm.pkl"
+    else:
+        ll_fname = data_path + "ll.pkl"
     ll_fp = open(ll_fname, "wb")
     pickle.dump(likelihood_dict, ll_fp)
     ll_fp.close()
     hull_area_df = pd.DataFrame(hull_areas, columns=TB_CLASSES)
-    hull_area_df.to_csv(data_path + "hull_area.csv")
+    if norm:
+        hull_area_df.to_csv(data_path + "hull_area_norm.csv")
+    else:
+        hull_area_df.to_csv(data_path + "hull_area.csv")
 
     num_core_points_df = pd.DataFrame(num_core_points, columns=TB_CLASSES)
-    num_core_points_df.to_csv(data_path + "num_core_points_.csv")
+    if norm:
+        num_core_points_df.to_csv(data_path + "num_core_points_norm.csv")
+    else:
+        num_core_points_df.to_csv(data_path + "num_core_points.csv")
     
     density_df = pd.DataFrame(density, columns=TB_CLASSES)
-    density_df.to_csv(data_path + "density.csv")
-    
+    if norm:
+        density_df.to_csv(data_path + "density_norm.csv")
+    else:
+        density_df.to_csv(data_path + "density.csv")
+
     mean_density_df = density_df.mean(axis=1)
-    mean_density_df.to_csv(data_path + "mean_density.csv")
+    if norm:
+        mean_density_df.to_csv(data_path + "mean_density_norm.csv")
+    else:
+        mean_density_df.to_csv(data_path + "mean_density.csv")
+    pd.options.display.float_format = '{:.2f}'.format
     
-    print(density_df)
-    print(mean_density_df)
+    print("density:\n", tabulated(density_df))
+    print("mean_density:\n", mean_density_df)
     
-    
+
+def tabulated(df):
+    """Tabulate a pandas dataframe"""
+    from tabulate import tabulate
+    return tabulate(df, headers='keys', tablefmt='psql')
+
+
 def make_ll_tbl(save_path, dic):
     """Beautify table"""
     assert len(list(dic.keys())) == 576
@@ -318,8 +345,17 @@ def make_ll_tbl(save_path, dic):
             col += 12
             
         arr[row][col] = sum(dic[key])
-        
+        # print(arr[row][col])
     np.savetxt(save_path+"ll.csv", arr, delimiter=',')
+
+    pd.options.display.float_format = '{:.2f}'.format
+    tb_arr = arr[:12, :12]
+    print(type(tb_arr), tb_arr.shape, TB_CLASSES)
+    arr_df = pd.DataFrame(arr[:len(TB_CLASSES), :len(TB_CLASSES)], columns=list(map(lambda x: "TB " + x, TB_CLASSES)))
+    print(tabulated(arr_df))
+
+    arr_df = pd.DataFrame(arr[len(TB_CLASSES):, len(TB_CLASSES):], columns=list(map(lambda x: "IN12 " + x, TB_CLASSES)))
+    print(tabulated(arr_df))
     
     arr = np.zeros(shape=(2, 12), dtype=float)
     for i, cl in enumerate(TB_CLASSES):
@@ -331,14 +367,15 @@ def make_ll_tbl(save_path, dic):
     
     arr_df = pd.DataFrame(arr, columns=TB_CLASSES)
     arr_df.to_csv(save_path + "ll_domain.csv")
-    print(arr_df)
+    pd.options.display.float_format = '{:.2f}'.format
+    print(tabulated(arr_df))
     
     arr_df_mean = arr_df.mean(axis=1)
-    print("LL_domain: ", arr_df_mean)
+    print("LL_domain:\n", arr_df_mean)
     arr_df_mean = np.array([arr_df_mean.mean(axis=0)])
     # arr_df_mean.to_csv(save_path + "ll_domain_mean.csv")
     np.savetxt(save_path + "ll_domain_mean.csv", arr_df_mean, delimiter=',')
-    print("ll_domain:", arr_df_mean)
+    print("ll_domain mean:\n", arr_df_mean)
     # np.savetxt(save_path + "ll_domain.csv", arr, delimiter=',')
     
 

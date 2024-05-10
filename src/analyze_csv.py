@@ -83,7 +83,7 @@ class CSVUtil:
 
 
 if __name__ == '__main__':
-    csv_path = "../out/IN12_SUP/exp_Apr_08_2024_18_58/output/final_model/in12_train.csv"
+    csv_path = "../out/IN12_SUP/in12_supervised_pretrained_finetune_1/output/final_model/in12_test.csv"
     csv_util = CSVUtil(fpath=csv_path)
     print(f"Accuracy: {csv_util.get_accuracy()}")
     print(f"Loss: {csv_util.get_loss()}")

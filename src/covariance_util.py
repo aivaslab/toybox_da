@@ -68,7 +68,7 @@ def get_activations_dicts(model_path, keys, backbone=True):
         act_path = model_path + f"model_epoch_{key}/" if isinstance(key, int) else model_path + \
             ACT_DIR_FNAMES[key]
         act_path += "backbone/activations/" if backbone else "bottleneck/activations/"
-        assert os.path.isdir(act_path)
+        assert os.path.isdir(act_path), f"{act_path} does not exist"
         for dset in ['toybox_train', 'in12_train']:
             for cl in TB_CLASSES:
                 activations = get_activations(path=act_path, dset=dset, cl=cl)
