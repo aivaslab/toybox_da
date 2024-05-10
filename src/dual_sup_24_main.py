@@ -65,6 +65,8 @@ def get_parser():
                         help="Use this flag to start from pretrained network")
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
+    parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of model saving")
     return vars(parser.parse_args())
 
 
@@ -91,9 +93,12 @@ def main():
     num_images_per_class = exp_args['images']
     combined_batch = exp_args['combined_batch']
     target_frac = exp_args['target_frac']
+    save_dir = exp_args['save_dir']
+    save_freq = exp_args['save_freq']
     
     start_time = datetime.datetime.now()
-    tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
+    tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
+        OUT_DIR + "TB_IN12/" + save_dir + "/"
     tb_writer = tb.SummaryWriter(log_dir=tb_path)
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt")
     
@@ -208,6 +213,9 @@ def main():
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,
                                trgt_train_loader=trgt_loader_train, trgt_test_loader=trgt_loader_test,
                                writer=tb_writer, step=ep * steps, logger=logger)
+
+        if save_freq > 0 and ep % save_freq == 0:
+            net.save_model(fpath=tb_path + f"model_epoch_{ep}.pt")
     
     src_tr_acc, src_te_acc, trgt_tr_acc, trgt_te_acc = get_train_test_acc(model=model,
                                                                           src_train_loader=src_loader_train,
@@ -218,12 +226,7 @@ def main():
                                                                           step=num_epochs * steps, logger=logger)
     
     tb_writer.close()
-    save_dict = {
-        'type': net.__class__.__name__,
-        'backbone': net.backbone.model.state_dict(),
-        'classifier': net.classifier_head.state_dict(),
-    }
-    torch.save(save_dict, tb_path + "final_model.pt")
+    net.save_model(fpath=tb_path + "final_model.pt")
     
     exp_args['tb_train'] = src_tr_acc
     exp_args['tb_test'] = src_te_acc
