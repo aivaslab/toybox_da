@@ -8,6 +8,11 @@ import math
 import networkx as nx
 from scipy.spatial import ConvexHull
 from scipy import stats
+import matplotlib as mpl
+from matplotlib.patches import ConnectionPatch
+from tabulate import tabulate
+from collections import defaultdict
+from scipy.stats import pearsonr
 
 import pickle
 
@@ -377,6 +382,257 @@ def make_ll_tbl(save_path, dic):
     np.savetxt(save_path + "ll_domain_mean.csv", arr_df_mean, delimiter=',')
     print("ll_domain mean:\n", arr_df_mean)
     # np.savetxt(save_path + "ll_domain.csv", arr, delimiter=',')
+
+
+def print_umap_overlap(arr, model_name, key):
+    print("-".join([model_name, key]).center(86))
+    print(tabulate(arr, headers=['Class', 'Self LL', 'Avg Cross LL', 'Diff-1', 'Max Cross LL', 'Diff-2'],
+                   tablefmt="psql", floatfmt=".1f"))
+
+
+def print_overlap_table(data_dict, key):
+    avg_diff, max_diff = [], []
+    for model_name, data_arr in data_dict.items():
+        # print_umap_overlap(arr=tb_arr, model_name=model_name, key='Toybox')
+
+        avg_arr, max_arr = [model_name], [model_name]
+        avg_sum, max_sum = 0.0, 0.0
+        for i, cl in enumerate(TB_CLASSES):
+            avg_arr.append(data_arr[i][3])
+            avg_sum += data_arr[i][3]
+            max_arr.append(data_arr[i][5])
+            max_sum += data_arr[i][5]
+
+        avg_arr.append(round(avg_sum / 12, 3))
+        max_arr.append(round(max_sum / 12, 3))
+
+        avg_diff.append(avg_arr)
+        max_diff.append(max_arr)
+
+    print("-".join([key, 'Avg Diff']).center(150))
+    print(tabulate(avg_diff, headers=['Model'] + TB_CLASSES + ["Average"], tablefmt='psql', floatfmt='.2f'))
+    print("-".join([key, 'Max Diff']).center(150))
+    print(tabulate(max_diff, headers=['Model'] + TB_CLASSES + ["Average"], tablefmt='psql', floatfmt='.2f'))
+
+
+def create_correlation_table(pre_accs, pre_avg, pre_max, post_accs, post_avg, post_max, key):
+    corr_table = []
+    corr, p = pearsonr(pre_accs, pre_avg)
+    corr_table.append(['Avg Diff Pre', 'N', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+
+    corr, p = pearsonr(post_accs, post_avg)
+    corr_table.append(['Avg Diff', 'N', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+
+    corr, p = pearsonr(pre_accs, pre_max)
+    corr_table.append(['Max Diff Pre', 'N', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+
+    corr, p = pearsonr(post_accs, post_max)
+    corr_table.append(['Max Diff', 'N', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+
+    corr, p = pearsonr(pre_accs, list(map(lambda x: math.log(x, 10), [0.01 if i <= 0 else i for i in pre_avg])))
+    corr_table.append(['Avg Diff Pre', 'Y', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+
+    corr, p = pearsonr(post_accs, list(map(lambda x: math.log(x, 10), [0.01 if i <= 0 else i for i in post_avg])))
+    corr_table.append(['Avg Diff', 'Y', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+
+    corr, p = pearsonr(pre_accs, list(map(lambda x: math.log(x, 10), [0.01 if i <= 0 else i for i in pre_max])))
+    corr_table.append(['Max Diff Pre', 'Y', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+
+    corr, p = pearsonr(post_accs, list(map(lambda x: math.log(x, 10), [0.01 if i <= 0 else i for i in post_max])))
+    corr_table.append(['Max Diff', 'Y', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+
+    print(key.center(40))
+    print(tabulate(corr_table, headers=['Metric', 'Log', 'r', 'p'], tablefmt='psql'))
+
+
+def calc_overlap_corr_by_model(accs, data_dict, key):
+    avg_arr, max_arr = {}, {}
+    for model_name, data_arr in data_dict.items():
+        avg_sum, max_sum = 0.0, 0.0
+        for i, cl in enumerate(TB_CLASSES):
+            avg_sum += data_arr[i][3]
+            max_sum += data_arr[i][5]
+
+        avg_arr[model_name] = round(avg_sum / 12, 2)
+        max_arr[model_name] = round(max_sum / 12, 2)
+
+    pre_accs, pre_avg, pre_max, post_accs, post_avg, post_max = [], [], [], [], [], []
+    for model_name in data_dict.keys():
+        if not model_name.endswith("_pre"):
+            pre_accs.append(accs[model_name])
+            post_accs.append(accs[model_name])
+            pre_avg.append(avg_arr[model_name+"_pre"])
+            pre_max.append(max_arr[model_name+"_pre"])
+            post_avg.append(avg_arr[model_name])
+            post_max.append(max_arr[model_name])
+
+    create_correlation_table(pre_accs=pre_accs, pre_avg=pre_avg, pre_max=pre_max, post_accs=post_accs,
+                             post_avg=post_avg, post_max=post_max, key=key)
+
+
+def calc_overlap_corr_by_model_by_class(accs, data_dict, key):
+    avg_arr, max_arr = defaultdict(list), defaultdict(list)
+    for model_name, data_arr in data_dict.items():
+        for i, cl in enumerate(TB_CLASSES):
+            avg_arr[model_name].append(round(data_arr[i][3], 2))
+            max_arr[model_name].append(round(data_arr[i][5], 2))
+
+    pre_accs, pre_avg, pre_max, post_accs, post_avg, post_max = [], [], [], [], [], []
+    for model_name in data_dict.keys():
+        if not model_name.endswith("_pre"):
+            pre_accs += accs[model_name]
+            post_accs += accs[model_name]
+            pre_avg += avg_arr[model_name+"_pre"]
+            pre_max += max_arr[model_name+"_pre"]
+            post_avg += avg_arr[model_name]
+            post_max += max_arr[model_name]
+    create_correlation_table(pre_accs=pre_accs, pre_avg=pre_avg, pre_max=pre_max, post_accs=post_accs,
+                             post_avg=post_avg, post_max=post_max, key=key)
+
+
+def get_scatter_plots_by_model(accs, data_dict, title):
+    COLORS = {}
+    cmap_name = 'Dark2'
+    idx = 0
+    for model_name in accs.keys():
+        if not model_name.endswith("_pre"):
+            COLORS[model_name] = mpl.colormaps[cmap_name].colors[idx]
+            COLORS[model_name + "_pre"] = mpl.colormaps[cmap_name].colors[idx]
+            idx += 1
+
+    avg_avg = defaultdict(float)
+    max_avg = defaultdict(float)
+
+    for model_name, data_arr in data_dict.items():
+        avg_sum, max_sum = 0.0, 0.0
+        for i, cl in enumerate(TB_CLASSES):
+            avg_sum += data_arr[i][3]
+            max_sum += data_arr[i][5]
+
+        avg_avg[model_name] = round(avg_sum / 12, 2)
+        max_avg[model_name] = round(max_sum / 12, 2)
+
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
+
+    for model_name, acc in accs.items():
+        if model_name.endswith("_pre"):
+            ax[0][0].scatter(y=[acc], x=[avg_avg[model_name]], label=model_name[:-4], c=[COLORS[model_name]])
+    ax[0][0].set_xlabel("Avg Diff Pre")
+    ax[0][0].set_ylabel("Accuracy")
+    ax[0][0].set_xscale('log')
+
+    for model_name, acc in accs.items():
+        if model_name.endswith("_pre"):
+            ax[0][1].scatter(y=[acc], x=[max_avg[model_name]], label=model_name[:-4], c=[COLORS[model_name]])
+    ax[0][1].set_xlabel("Max Diff Pre")
+    ax[0][1].set_ylabel("Accuracy")
+    ax[0][1].set_xscale('log')
+
+    for model_name, acc in accs.items():
+        if not model_name.endswith("_pre"):
+            ax[1][0].scatter(y=[acc], x=[avg_avg[model_name]], label=model_name, c=[COLORS[model_name]])
+    ax[1][0].set_xlabel("Avg Diff")
+    ax[1][0].set_ylabel("Accuracy")
+    ax[1][0].set_xscale('log')
+
+    for model_name, acc in accs.items():
+        if not model_name.endswith("_pre"):
+            ax[1][1].scatter(y=[acc], x=[max_avg[model_name]], label=model_name, c=[COLORS[model_name]])
+    ax[1][1].set_xlabel("Max Diff")
+    ax[1][1].set_ylabel("Accuracy")
+    ax[1][1].set_xscale('log')
+
+    handles, labels = ax[1][1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='center right')
+
+    for model_name in data_dict.keys():
+        if not model_name.endswith("_pre"):
+            con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"], accs[model_name + "_pre"]),
+                                  xyB=(avg_avg[model_name], accs[model_name]), coordsA="data", coordsB="data",
+                                  axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name], alpha=0.2)
+
+            fig.add_artist(con)
+
+            con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"], accs[model_name + "_pre"]),
+                                  xyB=(max_avg[model_name], accs[model_name]), coordsA="data", coordsB="data",
+                                  axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name], alpha=0.2)
+
+            fig.add_artist(con)
+
+    plt.suptitle(title)
+
+    plt.show()
+
+
+def get_scatter_plots_by_model_by_class(accs, data_dict, title):
+    COLORS = {}
+    cmap_name = 'Dark2'
+    idx = 0
+    for model_name in accs.keys():
+        if not model_name.endswith("_pre"):
+            COLORS[model_name] = mpl.colormaps[cmap_name].colors[idx]
+            COLORS[model_name + "_pre"] = mpl.colormaps[cmap_name].colors[idx]
+            idx += 1
+
+    avg_avg = defaultdict(list)
+    max_avg = defaultdict(list)
+
+    for model_name, data_arr in data_dict.items():
+        for i, cl in enumerate(TB_CLASSES):
+            avg_avg[model_name].append(data_arr[i][3])
+            max_avg[model_name].append(data_arr[i][5] if data_arr[i][5] > 0 else 1.0)
+
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
+    for model_name, acc in accs.items():
+        if model_name.endswith("_pre"):
+            ax[0][0].scatter(y=acc, x=avg_avg[model_name], label=model_name[:-4], c=[COLORS[model_name]])
+    ax[0][0].set_xlabel("Avg Diff Pre")
+    ax[0][0].set_ylabel("Accuracy")
+    ax[0][0].set_xscale('log')
+
+    for model_name, acc in accs.items():
+        if model_name.endswith("_pre"):
+            ax[0][1].scatter(y=acc, x=max_avg[model_name], label=model_name[:-4], c=[COLORS[model_name]])
+    ax[0][1].set_xlabel("Max Diff Pre")
+    ax[0][1].set_ylabel("Accuracy")
+    ax[0][1].set_xscale('log')
+
+    for model_name, acc in accs.items():
+        if not model_name.endswith("_pre"):
+            ax[1][0].scatter(y=acc, x=avg_avg[model_name], label=model_name, c=[COLORS[model_name]])
+    ax[1][0].set_xlabel("Avg Diff")
+    ax[1][0].set_ylabel("Accuracy")
+    ax[1][0].set_xscale('log')
+
+    for model_name, acc in accs.items():
+        if not model_name.endswith("_pre"):
+            ax[1][1].scatter(y=acc, x=max_avg[model_name], label=model_name, c=[COLORS[model_name]])
+    ax[1][1].set_xlabel("Max Diff")
+    ax[1][1].set_ylabel("Accuracy")
+    ax[1][1].set_xscale('log')
+
+    handles, labels = ax[1][1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='center right')
+
+    for model_name in data_dict.keys():
+        if not model_name.endswith("_pre"):
+            for i, cl in enumerate(TB_CLASSES):
+                con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
+                                      xyB=(avg_avg[model_name][i], accs[model_name][i]), coordsA="data", coordsB="data",
+                                      axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name],
+                                      alpha=0.2)
+
+                fig.add_artist(con)
+
+                con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
+                                      xyB=(max_avg[model_name][i], accs[model_name][i]), coordsA="data", coordsB="data",
+                                      axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name],
+                                      alpha=0.2)
+                fig.add_artist(con)
+
+    plt.suptitle(title)
+
+    plt.show()
     
 
 if __name__ == "__main__":
