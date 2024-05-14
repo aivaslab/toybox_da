@@ -251,12 +251,18 @@ class DualSupWithJANModel:
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
+        # self.jmmd_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+        #     kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+        #              [mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+        #              ),
+        #     linear=False,
+        # ).cuda()
         self.jmmd_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
             kernels=([mmd_util.GaussianKernel(alpha=2 ** k) for k in range(-3, 2)],
                      (mmd_util.GaussianKernel(sigma=0.92, track_running_stats=False),)
                      ),
             linear=False,
-            thetas=None,
+            # thetas=None,
         ).cuda()
         self.jmmd_loss.train()
         self.logger = logger
