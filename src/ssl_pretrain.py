@@ -2,6 +2,7 @@
 import argparse
 import datetime
 import os
+import numpy as np
 
 import torch
 import torch.utils.data as torchdata
@@ -13,9 +14,10 @@ import models
 import networks
 import utils
 
-TEMP_DIR = "../temp/IN12_SSL/"
-OUT_DIR = "../out/IN12_SSL/"
-os.makedirs(TEMP_DIR, exist_ok=True)
+TB_OUT_DIR = "../out/TB_SSL/"
+IN12_OUT_DIR = "../out/IN12_SSL/"
+os.makedirs(TB_OUT_DIR, exist_ok=True)
+os.makedirs(IN12_OUT_DIR, exist_ok=True)
 
 
 def get_parser():
@@ -35,6 +37,7 @@ def get_parser():
     parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
     parser.add_argument("--decoupled", action='store_true', default=False, help="This flag allows us  to use "
                                                                                 "decoupled contrastive loss")
+    parser.add_argument("--dataset", required=True, choices=['in12', 'toybox', 'joint'], help="SSL dataset to train on")
     
     return vars(parser.parse_args())
 
@@ -48,25 +51,47 @@ def main():
     no_save = exp_args['no_save']
     save_dir = exp_args['save_dir']
     decoupled_loss = exp_args['decoupled']
+    dataset = exp_args['dataset'].lower()
+    assert dataset in ['in12', 'toybox']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
     gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
-    transform_train = transforms.Compose([transforms.ToPILImage(),
-                                          transforms.RandomApply([color_jitter], p=0.8),
-                                          transforms.RandomGrayscale(p=0.2),
-                                          transforms.RandomApply([gaussian_blur], p=0.2),
-                                          transforms.Resize(256),
-                                          transforms.RandomResizedCrop(size=224),
-                                          transforms.RandomHorizontalFlip(),
-                                          transforms.ToTensor(),
-                                          transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
-    data_train = datasets.DatasetIN12SSL(transform=transform_train, fraction=1.0, hypertune=True)
-    loader_train = torchdata.DataLoader(data_train, batch_size=exp_args['bsize'], shuffle=True, num_workers=workers,
-                                        pin_memory=True, persistent_workers=True, drop_last=True)
+
+    if dataset == 'in12':
+        transform_train = transforms.Compose([transforms.ToPILImage(),
+                                              transforms.RandomApply([color_jitter], p=0.8),
+                                              transforms.RandomGrayscale(p=0.2),
+                                              transforms.RandomApply([gaussian_blur], p=0.2),
+                                              transforms.Resize(256),
+                                              transforms.RandomResizedCrop(size=224),
+                                              transforms.RandomHorizontalFlip(),
+                                              transforms.ToTensor(),
+                                              transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
+        data_train = datasets.DatasetIN12SSL(transform=transform_train, fraction=1.0, hypertune=True)
+        loader_train = torchdata.DataLoader(data_train, batch_size=exp_args['bsize'], shuffle=True, num_workers=workers,
+                                            pin_memory=True, persistent_workers=True, drop_last=True)
+    else:
+        transform_train = transforms.Compose([transforms.ToPILImage(),
+                                              transforms.RandomApply([color_jitter], p=0.8),
+                                              transforms.RandomGrayscale(p=0.2),
+                                              transforms.RandomApply([gaussian_blur], p=0.2),
+                                              transforms.Resize(256),
+                                              transforms.RandomResizedCrop(size=224),
+                                              transforms.RandomHorizontalFlip(),
+                                              transforms.ToTensor(),
+                                              transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)])
+        data_train = datasets.ToyboxDatasetSSL(rng=np.random.default_rng(0), transform=transform_train, fraction=1.0,
+                                               hypertune=True, distort='object')
+        loader_train = torchdata.DataLoader(data_train, batch_size=exp_args['bsize'], shuffle=True, num_workers=workers,
+                                            pin_memory=True, persistent_workers=True, drop_last=True)
 
     start_time = datetime.datetime.now()
-    tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
-        OUT_DIR + save_dir + "/"
+    if dataset == "in12":
+        tb_path = IN12_OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
+            IN12_OUT_DIR + save_dir + "/"
+    else:
+        tb_path = TB_OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
+            TB_OUT_DIR + save_dir + "/"
     assert not os.path.isdir(tb_path), f"{tb_path} already exists.."
     tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path+"log.txt", no_save=no_save)
