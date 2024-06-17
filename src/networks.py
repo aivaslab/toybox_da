@@ -345,6 +345,16 @@ class ResNet18Sup12x2(nn.Module):
                 'classifier_2_params': self.classifier_head_2.parameters(),
                 }
 
+    def save_model(self, fpath: str):
+        """Save the model"""
+        save_dict = {
+            'type': self.__class__.__name__,
+            'backbone': self.backbone.model.state_dict(),
+            'classifier_1': self.classifier_head_1.state_dict(),
+            'classifier_2': self.classifier_head_2.state_dict(),
+        }
+        torch.save(save_dict, fpath)
+
 
 class ResNet18Sup12x2v2(nn.Module):
     """Definition for Supervised network with ResNet18"""

@@ -72,6 +72,7 @@ def get_parser():
                         help="Use this flag to specify the run mode")
     parser.add_argument("--p", "-p", default=0.5, type=float, help="Probability of Dropout")
     parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of saving model")
+    parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
     return vars(parser.parse_args())
 
 
@@ -204,11 +205,13 @@ def main():
     amp = exp_args['amp']
     dropout_p = exp_args['p']
     save_freq = exp_args['save_freq']
+    save_dir = exp_args['save_dir']
     if amp:
         torch.set_float32_matmul_precision('high')
     
     start_time = datetime.datetime.now()
-    tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
+    tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
+        OUT_DIR + "TB_IN12/" + save_dir + "/"
     tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
     
