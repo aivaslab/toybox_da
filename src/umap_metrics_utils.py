@@ -13,6 +13,7 @@ from matplotlib.patches import ConnectionPatch
 from tabulate import tabulate
 from collections import defaultdict
 from scipy.stats import pearsonr
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import pickle
 
@@ -202,7 +203,7 @@ def compute_kde(path, dataset, target_cl, points):
     kde(path=path, dataset=dataset, target_cl=target_cl, m1=x, m2=y)
     
     
-def get_all_kde(dataset, cl, all_points, ll_dict):
+def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points, img_path):
     """Get all kde"""
     train_points = all_points[(dataset, cl)]
     train_data = np.array(train_points)
@@ -210,7 +211,7 @@ def get_all_kde(dataset, cl, all_points, ll_dict):
     from sklearn.model_selection import GridSearchCV
     import time
     st_time = time.time()
-    bandwidths = 10 ** np.linspace(-1, 0, 5)
+    bandwidths = 10 ** np.linspace(-5, -1, 20)
     grid = GridSearchCV(KernelDensity(kernel='gaussian'),
                         {'bandwidth': bandwidths},
                         cv=5,
@@ -225,9 +226,52 @@ def get_all_kde(dataset, cl, all_points, ll_dict):
             eval_data = np.array(eval_points)  # np.vstack([eval_x, eval_y])
             eval_likelihood = kernel.score_samples(eval_data)
             ll_dict[(dataset, cl, eval_dset, eval_cl)] = eval_likelihood
+
+    zz = kernel.score_samples(grid_points)
+    # print(grid_points.shape, zz.shape)
+    zz = zz.reshape(grid_xx.shape[0], -1)
+    fig, ax = plt.subplots(figsize=(16, 9))
+    cont = ax.contourf(grid_xx, grid_yy, zz, levels=100, cmap='viridis_r', vmin=-1000)
+    fig.colorbar(cont, ax=ax, orientation='vertical', location='right')
+    # plt.axis('scaled')
+    ax.set_title(f"KDE ({dataset}-{cl})")
+
+    kde_out_path = img_path + f"images/kde/{dataset}/"
+    os.makedirs(kde_out_path, exist_ok=True)
+    plt.savefig(fname=kde_out_path + f"{cl}_kde.png", bbox_inches='tight')
+    ax.scatter(train_data[:, 0], train_data[:, 1], marker='o', c='white', alpha=0.1)
+    plt.savefig(fname=kde_out_path + f"{cl}_kde_with_points.png", bbox_inches='tight')
+    plt.close()
+    # plt.imshow(zz, cmap='viridis_r')
+    # plt.colorbar()
+    # plt.show()
     # print(dataset, cl, time.time() - st_time)
     return ll_dict
-    
+
+
+def compute_grid_points(all_points):
+    # print("entering compute grid_points")
+    xmin, ymin, xmax, ymax = np.inf, np.inf, -np.inf, -np.inf
+    for dset in ['tb_train', 'in12_train']:
+        for cl in TB_CLASSES:
+            points = all_points[(dset, cl)]
+            # print(points.shape, points[:, 0].shape, points[:, 1].shape, "remove print")
+            xmin = min(xmin, points[:, 0].min())
+            xmax = max(xmax, points[:, 0].max())
+            ymin = min(ymin, points[:, 1].min())
+            ymax = max(ymax, points[:, 1].max())
+    # print(xmin, xmax, ymin, ymax)
+
+    num_cells = 500
+    x = np.linspace(xmin-1, xmax+1, num_cells+1)
+    y = np.linspace(ymin-1, ymax+1, num_cells+1)
+    xx, yy = np.meshgrid(x, y)
+    xx_r, yy_r = xx.reshape(-1, 1), yy.reshape(-1, 1)
+    coords = np.hstack((xx_r, yy_r))
+    # print(xx.shape, yy.shape, coords.shape)
+    # print("leaving compute grid_points")
+    return xx, yy, coords
+
 
 def preprocess(path):
     """Prepare umap data"""
@@ -270,10 +314,13 @@ def main(p, norm=True):
         
             # mst(path=p, dataset=dset, target_cl=tb_cl, points=datapoints)
 
+    xx, yy, coords = compute_grid_points(all_points=datapoints_dict)
+
     for dset in ['tb_train', 'in12_train']:
         for tb_cl in TB_CLASSES:
             likelihood_dict = get_all_kde(dataset=dset, cl=tb_cl,
-                                          all_points=datapoints_dict, ll_dict=likelihood_dict)
+                                          all_points=datapoints_dict, ll_dict=likelihood_dict,
+                                          grid_xx=xx, grid_yy=yy, grid_points=coords, img_path=p)
 
     # print(len(list(likelihood_dict.keys())))
 
@@ -337,6 +384,7 @@ def tabulated(df):
 
 def make_ll_tbl(save_path, dic):
     """Beautify table"""
+    import statistics
     assert len(list(dic.keys())) == 576
     
     arr = np.zeros(shape=(24, 24), dtype=float)
@@ -349,13 +397,13 @@ def make_ll_tbl(save_path, dic):
         if trgt_d == "in12_train":
             col += 12
             
-        arr[row][col] = sum(dic[key])
+        arr[row][col] = statistics.fmean(dic[key])
         # print(arr[row][col])
     np.savetxt(save_path+"ll.csv", arr, delimiter=',')
 
     pd.options.display.float_format = '{:.2f}'.format
     tb_arr = arr[:12, :12]
-    print(type(tb_arr), tb_arr.shape, TB_CLASSES)
+    # print(type(tb_arr), tb_arr.shape, TB_CLASSES)
     arr_df = pd.DataFrame(arr[:len(TB_CLASSES), :len(TB_CLASSES)], columns=list(map(lambda x: "TB " + x, TB_CLASSES)))
     print(tabulated(arr_df))
 
@@ -373,14 +421,14 @@ def make_ll_tbl(save_path, dic):
     arr_df = pd.DataFrame(arr, columns=TB_CLASSES)
     arr_df.to_csv(save_path + "ll_domain.csv")
     pd.options.display.float_format = '{:.2f}'.format
-    print(tabulated(arr_df))
+    # print(tabulated(arr_df))
     
     arr_df_mean = arr_df.mean(axis=1)
-    print("LL_domain:\n", arr_df_mean)
+    # print("LL_domain:\n", arr_df_mean)
     arr_df_mean = np.array([arr_df_mean.mean(axis=0)])
     # arr_df_mean.to_csv(save_path + "ll_domain_mean.csv")
     np.savetxt(save_path + "ll_domain_mean.csv", arr_df_mean, delimiter=',')
-    print("ll_domain mean:\n", arr_df_mean)
+    # print("ll_domain mean:\n", arr_df_mean)
     # np.savetxt(save_path + "ll_domain.csv", arr, delimiter=',')
 
 
@@ -490,9 +538,9 @@ def calc_overlap_corr_by_model_by_class(accs, data_dict, key):
                              post_avg=post_avg, post_max=post_max, key=key)
 
 
-def get_scatter_plots_by_model(accs, data_dict, title):
+def get_scatter_plots_by_model(accs, data_dict, title, match_points=True):
     COLORS = {}
-    cmap_name = 'Dark2'
+    cmap_name = 'tab10'
     idx = 0
     for model_name in accs.keys():
         if not model_name.endswith("_pre"):
@@ -512,7 +560,7 @@ def get_scatter_plots_by_model(accs, data_dict, title):
         avg_avg[model_name] = round(avg_sum / 12, 2)
         max_avg[model_name] = round(max_sum / 12, 2)
 
-    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex='col', sharey=True)
 
     for model_name, acc in accs.items():
         if model_name.endswith("_pre"):
@@ -520,6 +568,7 @@ def get_scatter_plots_by_model(accs, data_dict, title):
     ax[0][0].set_xlabel("Avg Diff Pre")
     ax[0][0].set_ylabel("Accuracy")
     ax[0][0].set_xscale('log')
+    ax[0][0].set_ylim(0, 105)
 
     for model_name, acc in accs.items():
         if model_name.endswith("_pre"):
@@ -545,28 +594,29 @@ def get_scatter_plots_by_model(accs, data_dict, title):
     handles, labels = ax[1][1].get_legend_handles_labels()
     fig.legend(handles, labels, loc='center right')
 
-    for model_name in data_dict.keys():
-        if not model_name.endswith("_pre"):
-            con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"], accs[model_name + "_pre"]),
-                                  xyB=(avg_avg[model_name], accs[model_name]), coordsA="data", coordsB="data",
-                                  axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name], alpha=0.2)
+    if match_points:
+        for model_name in data_dict.keys():
+            if not model_name.endswith("_pre"):
+                con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"], accs[model_name + "_pre"]),
+                                      xyB=(avg_avg[model_name], accs[model_name]), coordsA="data", coordsB="data",
+                                      axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name], alpha=0.2)
 
-            fig.add_artist(con)
+                fig.add_artist(con)
 
-            con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"], accs[model_name + "_pre"]),
-                                  xyB=(max_avg[model_name], accs[model_name]), coordsA="data", coordsB="data",
-                                  axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name], alpha=0.2)
+                con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"], accs[model_name + "_pre"]),
+                                      xyB=(max_avg[model_name], accs[model_name]), coordsA="data", coordsB="data",
+                                      axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name], alpha=0.2)
 
-            fig.add_artist(con)
+                fig.add_artist(con)
 
     plt.suptitle(title)
 
     plt.show()
 
 
-def get_scatter_plots_by_model_by_class(accs, data_dict, title):
+def get_scatter_plots_by_model_by_class(accs, data_dict, title, match_points=True):
     COLORS = {}
-    cmap_name = 'Dark2'
+    cmap_name = 'tab10'
     idx = 0
     for model_name in accs.keys():
         if not model_name.endswith("_pre"):
@@ -582,13 +632,14 @@ def get_scatter_plots_by_model_by_class(accs, data_dict, title):
             avg_avg[model_name].append(data_arr[i][3])
             max_avg[model_name].append(data_arr[i][5] if data_arr[i][5] > 0 else 1.0)
 
-    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex='col', sharey=True)
     for model_name, acc in accs.items():
         if model_name.endswith("_pre"):
             ax[0][0].scatter(y=acc, x=avg_avg[model_name], label=model_name[:-4], c=[COLORS[model_name]])
     ax[0][0].set_xlabel("Avg Diff Pre")
     ax[0][0].set_ylabel("Accuracy")
     ax[0][0].set_xscale('log')
+    ax[0][0].set_ylim(0, 105)
 
     for model_name, acc in accs.items():
         if model_name.endswith("_pre"):
@@ -614,26 +665,105 @@ def get_scatter_plots_by_model_by_class(accs, data_dict, title):
     handles, labels = ax[1][1].get_legend_handles_labels()
     fig.legend(handles, labels, loc='center right')
 
-    for model_name in data_dict.keys():
-        if not model_name.endswith("_pre"):
-            for i, cl in enumerate(TB_CLASSES):
-                con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
-                                      xyB=(avg_avg[model_name][i], accs[model_name][i]), coordsA="data", coordsB="data",
-                                      axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name],
-                                      alpha=0.2)
+    if match_points:
+        for model_name in data_dict.keys():
+            if not model_name.endswith("_pre"):
+                for i, cl in enumerate(TB_CLASSES):
+                    con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
+                                          xyB=(avg_avg[model_name][i], accs[model_name][i]), coordsA="data", coordsB="data",
+                                          axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name],
+                                          alpha=0.2)
 
-                fig.add_artist(con)
+                    fig.add_artist(con)
 
-                con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
-                                      xyB=(max_avg[model_name][i], accs[model_name][i]), coordsA="data", coordsB="data",
-                                      axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name],
-                                      alpha=0.2)
-                fig.add_artist(con)
+                    con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
+                                          xyB=(max_avg[model_name][i], accs[model_name][i]), coordsA="data", coordsB="data",
+                                          axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name],
+                                          alpha=0.2)
+                    fig.add_artist(con)
 
     plt.suptitle(title)
 
     plt.show()
-    
+
+
+def get_scatter_plots_acc(accs, tb_dict, in12_dict, title, use_size_scale=True):
+    min_acc, max_acc = 0, 100
+
+    min_size, max_size = 0, 6
+    if use_size_scale:
+        size_func = lambda x: 4 ** (min_size + ((max_size - min_size) * (x - min_acc)) / (max_acc - min_acc))
+        alpha = 0.2
+    else:
+        size_func = lambda x: 30
+        alpha = 0.8
+    COLORS = {}
+    cmap_name = 'tab10'
+    idx = 0
+    for model_name in tb_dict.keys():
+        if not model_name.endswith("_pre"):
+            COLORS[model_name] = mpl.colormaps[cmap_name].colors[idx]
+            COLORS[model_name + "_pre"] = mpl.colormaps[cmap_name].colors[idx]
+            idx += 1
+
+    in12_avg_avg = defaultdict(list)
+    in12_max_avg = defaultdict(list)
+    tb_avg_avg = defaultdict(list)
+    tb_max_avg = defaultdict(list)
+
+    for model_name, data_arr in in12_dict.items():
+        for i, cl in enumerate(TB_CLASSES):
+            in12_avg_avg[model_name].append(in12_dict[model_name][i][3])
+            in12_max_avg[model_name].append(in12_dict[model_name][i][5] if data_arr[i][5] > 0.1 else 1.0)
+            tb_avg_avg[model_name].append(tb_dict[model_name][i][3])
+            tb_max_avg[model_name].append(tb_dict[model_name][i][5] if data_arr[i][5] > 0.1 else 1.0)
+
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex='col', sharey='col')
+    for model_name in in12_dict.keys():
+        if model_name.endswith("_pre"):
+            ax[0][0].scatter(y=tb_avg_avg[model_name], x=in12_avg_avg[model_name], label=model_name[:-4],
+                             c=[COLORS[model_name]], alpha=alpha, s=list(map(size_func, accs[model_name])))
+    ax[0][0].set_xlabel("IN-12 Avg Diff Pre")
+    ax[0][0].set_ylabel("Toybox Avg Diff Pre")
+    ax[0][0].set_xscale('log')
+    ax[0][0].set_yscale('log')
+
+    for model_name in in12_dict.keys():
+        if model_name.endswith("_pre"):
+            ax[0][1].scatter(y=tb_max_avg[model_name], x=in12_max_avg[model_name], label=model_name[:-4],
+                             c=[COLORS[model_name]], alpha=alpha, s=list(map(size_func, accs[model_name])))
+    ax[0][1].set_xlabel("IN-12 Max Diff Pre")
+    ax[0][1].set_ylabel("Toybox Max Diff Pre")
+    ax[0][1].set_xscale('log')
+    ax[0][1].set_yscale('log')
+
+    for model_name in in12_dict.keys():
+        if not model_name.endswith("_pre"):
+            ax[1][0].scatter(y=tb_avg_avg[model_name], x=in12_avg_avg[model_name], label=model_name,
+                             c=[COLORS[model_name]], alpha=alpha, s=list(map(size_func, accs[model_name])))
+    ax[1][0].set_xlabel("IN-12 Avg Diff")
+    ax[1][0].set_ylabel("Toybox Avg Diff")
+    ax[1][0].set_xscale('log')
+    ax[1][0].set_yscale('log')
+
+    for model_name in in12_dict.keys():
+        if not model_name.endswith("_pre"):
+            ax[1][1].scatter(y=tb_max_avg[model_name], x=in12_max_avg[model_name], label=model_name,
+                             c=[COLORS[model_name]], alpha=alpha, s=list(map(size_func, accs[model_name])))
+    ax[1][1].set_xlabel("IN-12 Max Diff")
+    ax[1][1].set_ylabel("Toybox Max Diff")
+    ax[1][1].set_xscale('log')
+    ax[1][1].set_yscale('log')
+
+    handles, labels = ax[1][1].get_legend_handles_labels()
+
+    legend = fig.legend(handles, labels, loc='center right', markerscale=0.5)
+    for handle in legend.legendHandles:
+        handle._sizes = [150]
+
+    plt.suptitle(title)
+
+    plt.show()
 
 if __name__ == "__main__":
     file_path = "../ICLR_OUT/TB_SUP_IN12_SCRAMBLED/exp_Sep_29_2023_01_09/umap_all_data/umap_200_0.1_euclidean/"
