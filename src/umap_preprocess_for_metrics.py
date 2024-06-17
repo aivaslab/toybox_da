@@ -16,7 +16,7 @@ def normalize(path):
     in12_test_data = []
     for fname in UMAP_FILENAMES:
         fpath = path + fname
-        assert os.path.isfile(fpath)
+        assert os.path.isfile(fpath), f"{fpath} does not exist"
         fp = open(fpath, "r")
         if "tb_train" in fname:
             tb_train_data = list(csv.DictReader(fp))
@@ -68,7 +68,7 @@ def normalize(path):
     
     
 def generate_scatter_plots(path):
-    """Generate_scatter_plots for the unnormed and normed coordinates"""
+    """Generate_scatter_plots for the original and normed coordinates"""
     scatter_out_path = path + "images/scatter/"
     os.makedirs(scatter_out_path, exist_ok=True)
     for i, (fname, norm_fname) in enumerate(zip(UMAP_FILENAMES, NORM_UMAP_FILENAMES)):

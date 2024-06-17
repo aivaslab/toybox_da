@@ -13,7 +13,6 @@ from matplotlib.patches import ConnectionPatch
 from tabulate import tabulate
 from collections import defaultdict
 from scipy.stats import pearsonr
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import pickle
 
@@ -23,6 +22,13 @@ UMAP_FILENAMES = ["tb_train.csv", "tb_test.csv", "in12_train.csv", "in12_test.cs
 NORM_UMAP_FILENAMES = ["tb_train_norm.csv", "tb_test_norm.csv", "in12_train_norm.csv", "in12_test_norm.csv"]
 TB_CLASSES = ['airplane', 'ball', 'car', 'cat', 'cup', 'duck',
               'giraffe', 'horse', 'helicopter', 'mug', 'spoon', 'truck']
+DATASETS = ["tb_train", "tb_test", "in12_train", "in12_test"]
+DSET_CUTOFFS = {
+    'tb_train'   : 0,
+    'tb_test'    : 12,
+    'in12_train' : 24,
+    'in12_test'  : 36
+}
 
 SRC_FILES = {
     'tb_train': "../data/data_12/Toybox/toybox_data_interpolated_cropped_dev.csv",
@@ -220,7 +226,7 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
     grid.fit(train_data)
     kernel = grid.best_estimator_
     kernel.fit(train_data)
-    for eval_dset in ['tb_train', "in12_train"]:
+    for eval_dset in DATASETS:
         for eval_cl in TB_CLASSES:
             eval_points = all_points[(eval_dset, eval_cl)]
             eval_data = np.array(eval_points)  # np.vstack([eval_x, eval_y])
@@ -252,7 +258,7 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
 def compute_grid_points(all_points):
     # print("entering compute grid_points")
     xmin, ymin, xmax, ymax = np.inf, np.inf, -np.inf, -np.inf
-    for dset in ['tb_train', 'in12_train']:
+    for dset in DATASETS:
         for cl in TB_CLASSES:
             points = all_points[(dset, cl)]
             # print(points.shape, points[:, 0].shape, points[:, 1].shape, "remove print")
@@ -281,15 +287,16 @@ def preprocess(path):
     
 def main(p, norm=True):
     """Main method"""
+
     preprocess(path=p)
     datapoints_dict = {}
     core_points_dict = {}
     hull_points_dict = {}
     likelihood_dict = {}
-    hull_areas = np.zeros(shape=(2, 12), dtype=float)
-    num_core_points = np.zeros(shape=(2, 12), dtype=int)
-    density = np.zeros(shape=(2, 12), dtype=int)
-    for dset in ['tb_train', "in12_train"]:  # [, 'tb_test', 'in12_train', 'in12_test']:
+    hull_areas = np.zeros(shape=(4, 12), dtype=float)
+    num_core_points = np.zeros(shape=(4, 12), dtype=int)
+    density = np.zeros(shape=(4, 12), dtype=int)
+    for dset in DATASETS:
         for tb_cl in TB_CLASSES:
             datapoints = get_points(path=p, dataset=dset, target_cl=tb_cl, norm=norm)
             datapoints_dict[(dset, tb_cl)] = datapoints
@@ -301,7 +308,7 @@ def main(p, norm=True):
             hull_points = [core_points[i] for i in range(len(core_points)) if i in hull_idxs]
             hull_points_dict[(dset, tb_cl)] = hull_points
             
-            ha_row = 0 if dset == "tb_train" else 1
+            ha_row = DSET_CUTOFFS[dset] // 12
             ha_col = TB_CLASSES.index(tb_cl)
             hull_areas[ha_row][ha_col] = hull_area
             num_core_points[ha_row][ha_col] = len(core_point_idxs)
@@ -316,7 +323,7 @@ def main(p, norm=True):
 
     xx, yy, coords = compute_grid_points(all_points=datapoints_dict)
 
-    for dset in ['tb_train', 'in12_train']:
+    for dset in DATASETS:
         for tb_cl in TB_CLASSES:
             likelihood_dict = get_all_kde(dataset=dset, cl=tb_cl,
                                           all_points=datapoints_dict, ll_dict=likelihood_dict,
@@ -325,7 +332,6 @@ def main(p, norm=True):
     # print(len(list(likelihood_dict.keys())))
 
     data_path = p + "/data/"
-
     os.makedirs(data_path, exist_ok=True)
     datapoints_fname = data_path + "datapoints.pkl" if not norm else data_path + "datapoints_norm.pkl"
     corepoints_fname = data_path + "corepoints.pkl" if not norm else data_path + "corepoints_norm.pkl"
@@ -347,6 +353,7 @@ def main(p, norm=True):
     ll_fp = open(ll_fname, "wb")
     pickle.dump(likelihood_dict, ll_fp)
     ll_fp.close()
+
     hull_area_df = pd.DataFrame(hull_areas, columns=TB_CLASSES)
     if norm:
         hull_area_df.to_csv(data_path + "hull_area_norm.csv")
@@ -379,44 +386,51 @@ def main(p, norm=True):
 def tabulated(df):
     """Tabulate a pandas dataframe"""
     from tabulate import tabulate
-    return tabulate(df, headers='keys', tablefmt='psql')
+    return tabulate(df, headers='keys', tablefmt='psql', floatfmt=".2f")
 
 
 def make_ll_tbl(save_path, dic):
     """Beautify table"""
     import statistics
-    assert len(list(dic.keys())) == 576
+    assert len(list(dic.keys())) == 2304
     
-    arr = np.zeros(shape=(24, 24), dtype=float)
+    arr = np.zeros(shape=(48, 48), dtype=float)
     for key in dic.keys():
         src_d, src_cl, trgt_d, trgt_cl = key
-        row = TB_CLASSES.index(src_cl)
-        if src_d == "in12_train":
-            row += 12
-        col = TB_CLASSES.index(trgt_cl)
-        if trgt_d == "in12_train":
-            col += 12
-            
+        row, col = DSET_CUTOFFS[src_d] + TB_CLASSES.index(src_cl), DSET_CUTOFFS[trgt_d] + TB_CLASSES.index(trgt_cl)
         arr[row][col] = statistics.fmean(dic[key])
-        # print(arr[row][col])
     np.savetxt(save_path+"ll.csv", arr, delimiter=',')
 
     pd.options.display.float_format = '{:.2f}'.format
-    tb_arr = arr[:12, :12]
-    # print(type(tb_arr), tb_arr.shape, TB_CLASSES)
-    arr_df = pd.DataFrame(arr[:len(TB_CLASSES), :len(TB_CLASSES)], columns=list(map(lambda x: "TB " + x, TB_CLASSES)))
+    arr_df = pd.DataFrame(arr[:len(TB_CLASSES), :len(TB_CLASSES)],
+                          columns=list(map(lambda x: "TB Tr " + x, TB_CLASSES)))
     print(tabulated(arr_df))
 
-    arr_df = pd.DataFrame(arr[len(TB_CLASSES):, len(TB_CLASSES):], columns=list(map(lambda x: "IN12 " + x, TB_CLASSES)))
+    arr_df = pd.DataFrame(arr[len(TB_CLASSES):2 * len(TB_CLASSES), len(TB_CLASSES):2 * len(TB_CLASSES)],
+                          columns=list(map(lambda x: "TB Te " + x, TB_CLASSES)))
+    print(tabulated(arr_df))
+
+    arr_df = pd.DataFrame(arr[2 * len(TB_CLASSES):3 * len(TB_CLASSES), 2 * len(TB_CLASSES):3 * len(TB_CLASSES)],
+                          columns=list(map(lambda x: "IN Tr " + x, TB_CLASSES)))
+    print(tabulated(arr_df))
+
+    arr_df = pd.DataFrame(arr[3 * len(TB_CLASSES):4 * len(TB_CLASSES), 3 * len(TB_CLASSES):4 * len(TB_CLASSES)],
+                          columns=list(map(lambda x: "IN Te " + x, TB_CLASSES)))
     print(tabulated(arr_df))
     
-    arr = np.zeros(shape=(2, 12), dtype=float)
+    arr = np.zeros(shape=(4, 12), dtype=float)
     for i, cl in enumerate(TB_CLASSES):
         lls = dic[("tb_train", cl, "in12_train", cl)]
-        arr[0][i] = sum(lls)
+        arr[0][i] = statistics.fmean(lls)
+
+        lls = dic[("tb_train", cl, "in12_test", cl)]
+        arr[1][i] = statistics.fmean(lls)
 
         lls = dic[("in12_train", cl, "tb_train", cl)]
-        arr[1][i] = sum(lls)
+        arr[2][i] = statistics.fmean(lls)
+
+        lls = dic[("in12_test", cl, "tb_train", cl)]
+        arr[2][i] = statistics.fmean(lls)
     
     arr_df = pd.DataFrame(arr, columns=TB_CLASSES)
     arr_df.to_csv(save_path + "ll_domain.csv")
