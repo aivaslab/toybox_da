@@ -173,6 +173,103 @@ class MTLModel:
         return round(acc, 2)
 
 
+class DualSSLModel:
+    """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
+
+    def __init__(self, network, src_loader, trgt_loader, logger, no_save, decoupled):
+        self.network = network
+        self.src_loader = utils.ForeverDataLoader(src_loader)
+        self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
+        self.logger = logger
+        self.network.cuda()
+        self.network.freeze_train()
+        self.no_save = no_save
+        self.decoupled = decoupled
+
+        num_params_trainable, num_params = self.network.count_trainable_parameters()
+        self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
+
+    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
+        """Train model"""
+        self.network.set_train()
+        num_batches = 0
+        src_loss_total = 0.0
+        trgt_loss_total = 0.0
+        ssl_loss_total = 0.0
+        criterion = nn.CrossEntropyLoss()
+        halfway = steps / 2.0
+        start_time = time.time()
+        for step in range(1, steps + 1):
+            optimizer.zero_grad()
+
+            src_idx, src_images = self.src_loader.get_next_batch()
+            trgt_idx, trgt_images = self.trgt_loader.get_next_batch()
+            src_images, trgt_images = torch.cat(src_images, dim=0), torch.cat(trgt_images, dim=0)
+            images = torch.concat([src_images, trgt_images], dim=0)
+            images = images.cuda()
+            feats = self.network.forward(images)
+            src_size = src_images.shape[0]
+            src_feats, trgt_feats = feats[:src_size], feats[src_size:]
+
+            if self.decoupled:
+                src_loss = utils.decoupled_contrastive_loss(features=src_feats, temp=0.5)
+                trgt_loss = utils.decoupled_contrastive_loss(features=trgt_feats, temp=0.5)
+            else:
+                src_logits, src_labels = utils.info_nce_loss(features=src_feats, temp=0.5)
+                src_loss = criterion(src_logits, src_labels)
+                trgt_logits, trgt_labels = utils.info_nce_loss(features=trgt_feats, temp=0.5)
+                trgt_loss = criterion(trgt_logits, trgt_labels)
+
+            loss = 1.0 * src_loss + 1.0 * trgt_loss
+            loss.backward()
+
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+
+            src_loss_total += src_loss.item()
+            trgt_loss_total += trgt_loss.item()
+            ssl_loss_total += loss.item()
+            num_batches += 1
+            if 0 <= step - halfway < 1:
+                self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
+                                 "T: {:.2f}s".format(
+                                    ep, ep_total, step, steps,
+                                    optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                                    src_loss_total / num_batches, trgt_loss_total / num_batches,
+                                    time.time() - start_time)
+                                 )
+
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'src_ssl_loss_ep': src_loss_total / num_batches,
+                        'src_ssl_loss_batch': src_loss.item(),
+                        'trgt_ssl_loss_ep': trgt_loss_total / num_batches,
+                        'trgt_ssl_loss_batch': trgt_loss.item(),
+                        'ssl_loss_ep': ssl_loss_total / num_batches,
+                        'ssl_loss_batch': loss.item(),
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'ssl_head': optimizer.param_groups[1]['lr'],
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+        self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
+                         "T: {:.2f}s".format(
+                            ep, ep_total, steps, steps,
+                            optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                            src_loss_total / num_batches, trgt_loss_total / num_batches,
+                            time.time() - start_time)
+                         )
+
+
 class SSLModel:
     """Module implementing the SSL method for pretraining the DA model"""
     
@@ -204,7 +301,7 @@ class SSLModel:
             images = images.cuda()
             feats = self.network.forward(images)
             if self.decoupled:
-                loss = utils.decoupled_contrastive_loss(features=feats, temp=0.5)
+                loss = utils.decoupled_contrastive_loss(features=feats, temp=0.1)
             else:
                 logits, labels = utils.info_nce_loss(features=feats, temp=0.5)
                 loss = criterion(logits, labels)
@@ -714,6 +811,145 @@ class DualSupModel:
             n_total += pred.shape[0]
         acc = n_correct / n_total
         return round(acc, 2)
+
+
+class DualSupModelWith2Classifiers:
+    """Module implementing the combined supervised pretraining on source and target datasets with
+    two different classifiers"""
+
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger, no_save):
+        self.network = network
+        self.source_loader = utils.ForeverDataLoader(source_loader)
+        self.target_loader = utils.ForeverDataLoader(target_loader)
+        self.logger = logger
+        self.combined_batch = combined_batch
+        self.no_save = no_save
+        self.network.cuda()
+
+    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
+        """Train model"""
+        self.network.set_train()
+        num_batches = 0
+        src_ce_loss_total = 0.0
+        trgt_ce_loss_total = 0.0
+        criterion = nn.CrossEntropyLoss()
+        halfway = steps / 2.0
+        start_time = time.time()
+        for step in range(1, steps + 1):
+            optimizer.zero_grad()
+
+            src_idx, src_images, src_labels = self.source_loader.get_next_batch()
+            src_images, src_labels = src_images.cuda(), src_labels.cuda()
+            trgt_idx, trgt_images, trgt_labels = self.target_loader.get_next_batch()
+            trgt_images, trgt_labels = trgt_images.cuda(), trgt_labels.cuda()
+
+            if self.combined_batch:
+                comb_images = torch.concat([src_images, trgt_images], dim=0)
+                src_feats, trgt_feats, src_logits, trgt_logits = self.network.forward(
+                    comb_images)
+            else:
+                src_feats, src_logits = self.network.forward_1(src_images)
+                trgt_feats, trgt_logits = self.network.forward_2(trgt_images)
+
+            src_loss = criterion(src_logits, src_labels)
+            trgt_loss = criterion(trgt_logits, trgt_labels)
+            total_loss = src_loss + trgt_loss
+
+            total_loss.backward()
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+
+            src_ce_loss_total += src_loss.item()
+            trgt_ce_loss_total += trgt_loss.item()
+            num_batches += 1
+
+            if 0 <= step - halfway < 1:
+                self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  SCE: {:.3f}  TCE: {:.3f}  "
+                                 "T: {:.2f}s"
+                                 .format(ep, ep_total, step, steps,
+                                         optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                                         src_ce_loss_total / num_batches, trgt_ce_loss_total / num_batches,
+                                         time.time() - start_time))
+
+            if not self.no_save:
+                writer.add_scalars(
+                    main_tag="training_loss",
+                    tag_scalar_dict={
+                        'src_ce_loss_ep': src_ce_loss_total / num_batches,
+                        'src_ce_loss_batch': src_loss.item(),
+                        'trgt_ce_loss_ep': trgt_ce_loss_total / num_batches,
+                        'trgt_ce_loss_batch': trgt_loss.item(),
+                        'total_loss_batch': total_loss.item(),
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+                writer.add_scalars(
+                    main_tag="training_lr",
+                    tag_scalar_dict={
+                        'bb': optimizer.param_groups[0]['lr'],
+                        'fc-1': optimizer.param_groups[1]['lr'],
+                        'fc-2': optimizer.param_groups[2]['lr'],
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+        self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  CLR: {:.3f}  SCE: {:.3f}  TCE: {:.3f}  "
+                         "T: {:.2f}s".format(ep, ep_total, steps, steps,
+                                             optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                                             src_ce_loss_total / num_batches, trgt_ce_loss_total / num_batches,
+                                             time.time() - start_time))
+
+    def calc_val_loss(self, loaders, loader_names, ep, steps, writer: tb.SummaryWriter):
+        """Calculate loss on provided dataloader"""
+        self.network.set_eval()
+        criterion = nn.CrossEntropyLoss()
+        losses = []
+        for idx, loader in enumerate(loaders):
+            num_batches = 0
+            total_loss = 0.0
+            for _, (idxs, images, labels) in enumerate(loader):
+                num_batches += 1
+                images, labels = images.cuda(), labels.cuda()
+                with torch.no_grad():
+                    if "in12" in loader_names[idx]:
+                        _, logits = self.network.forward_2(images)
+                    else:
+                        _, logits = self.network.forward_1(images)
+                loss = criterion(logits, labels)
+                total_loss += loss.item()
+            losses.append(total_loss / num_batches)
+        self.logger.info("Validation Losses -- {:s}: {:.2f}     {:s}: {:.2f}".format(loader_names[0], losses[0],
+                                                                                     loader_names[1], losses[1]))
+        if not self.no_save:
+            writer.add_scalars(main_tag="val_loss",
+                               tag_scalar_dict={
+                                   loader_names[0]: losses[0],
+                                   loader_names[1]: losses[1]
+                               },
+                               global_step=ep * steps)
+
+    def eval(self, loader):
+        """Evaluate the model on the provided dataloader"""
+        n_total_1 = 0
+        n_correct_1 = 0
+        n_total_2 = 0
+        n_correct_2 = 0
+        self.network.set_eval()
+        for _, (idxs, images, labels) in enumerate(loader):
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                _ , logits_1 = self.network.forward_1(images)
+                _ , logits_2 = self.network.forward_2(images)
+            top_1, pred_1 = utils.calc_accuracy(output=logits_1, target=labels, topk=(1,))
+            n_correct_1 += top_1[0].item() * pred_1.shape[0]
+            n_total_1 += pred_1.shape[0]
+
+            top_2, pred_2 = utils.calc_accuracy(output=logits_2, target=labels, topk=(1,))
+            n_correct_2 += top_2[0].item() * pred_2.shape[0]
+            n_total_2 += pred_2.shape[0]
+
+        acc_1, acc_2 = n_correct_1 / n_total_1, n_correct_2 / n_total_2
+        return round(acc_1, 2), round(acc_2, 2)
 
 
 class DualSupModelWithDomain:

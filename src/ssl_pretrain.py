@@ -114,7 +114,8 @@ def main():
     ssl_model = models.SSLModel(network=net, loader=loader_train, logger=logger, no_save=no_save,
                                 decoupled=decoupled_loss)
 
-    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
+    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
+                                nesterov=True, momentum=0.9)
     optimizer.add_param_group({'params': net.ssl_head.parameters(), 'lr': exp_args['lr']})
 
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
