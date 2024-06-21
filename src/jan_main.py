@@ -345,7 +345,7 @@ def main():
         if not no_save:
             net.save_model(fpath=tb_path+"best_tb_val_loss_model.pt")
 
-    if not no_save and save_freq > 0:
+    if not no_save:
         net.save_model(fpath=tb_path+f"model_epoch_0.pt")
 
     for ep in range(1, num_epochs + 1):
