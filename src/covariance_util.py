@@ -7,6 +7,7 @@ import sklearn.decomposition as decom
 import numpy as np
 import bisect
 
+DATASETS = ["toybox_train", "toybox_test", "in12_train", "in12_test"]
 TB_CLASSES = ['airplane', 'ball', 'car', 'cat', 'cup', 'duck', 'giraffe', 'horse', 'helicopter', 'mug', 'spoon',
               'truck']
 ACT_FNAMES = ['in12_train', 'in12_test', 'toybox_train', 'toybox_test']
@@ -19,8 +20,15 @@ SRC_FILES = {
 
 ACT_DIR_FNAMES = {
     'val_loss': "activations_best_tb_val_loss/",
-    'val_acc':  "activations_best_tb_val_acc/",
-    'final':    "final_model/"
+    'val_acc': "activations_best_tb_val_acc/",
+    'final': "final_model/"
+}
+
+DSET_CUTOFFS = {
+    'toybox_train':   0,
+    'toybox_test':    12,
+    'in12_train': 24,
+    'in12_test':  36
 }
 
 
@@ -39,11 +47,17 @@ def get_activations(path, dset, cl):
     src_data_fp = open(src_data_fpath, "r")
     src_data = list(csv.DictReader(src_data_fp))
     #     print(all_activations.shape, all_idxs.shape, len(src_data), all_activations.dtype)
-    sz = all_activations.shape[0] // len(TB_CLASSES)
+    sz = 0
+    idx_key = 'ID' if "toybox" in dset else "Index"
+    for i in range(all_activations.shape[0]):
+        idx = int(all_idxs[i])
+        idx2, src_cl = int(src_data[idx][idx_key]), src_data[idx]['Class']
+        assert idx == idx2
+        if src_cl == cl:
+            sz += 1
 
     ret_arr = np.zeros(shape=(sz, all_activations.shape[1]), dtype=all_activations.dtype)
     cntr = 0
-    idx_key = 'ID' if "toybox" in dset else "Index"
     for i in range(all_activations.shape[0]):
         idx = int(all_idxs[i])
         idx2, src_cl = int(src_data[idx][idx_key]), src_data[idx]['Class']
@@ -69,7 +83,7 @@ def get_activations_dicts(model_path, keys, backbone=True):
             ACT_DIR_FNAMES[key]
         act_path += "backbone/activations/" if backbone else "bottleneck/activations/"
         assert os.path.isdir(act_path), f"{act_path} does not exist"
-        for dset in ['toybox_train', 'in12_train']:
+        for dset in DATASETS:
             for cl in TB_CLASSES:
                 activations = get_activations(path=act_path, dset=dset, cl=cl)
                 act_mean = np.mean(activations, axis=0, keepdims=True)
@@ -84,13 +98,11 @@ def get_activations_dicts(model_path, keys, backbone=True):
 
 def get_arr_from_dict(src_dict):
     """Convert the dictionary src_dict to a 2d ndarray for plotting"""
-    ret_arr = np.ones(shape=(24, 24), dtype=float)
+    assert len(src_dict.keys()) == 2304, f"src_dict must have 2304(=48*48) keys, found {len(src_dict.keys())}"
+    ret_arr = np.ones(shape=(48, 48), dtype=float)
     for key, value in src_dict.items():
         d1, cl1, d2, cl2 = key
-        row = TB_CLASSES.index(cl1)
-        row += 12 if 'in12' in d1 else 0
-        col = TB_CLASSES.index(cl2)
-        col += 12 if 'in12' in d2 else 0
+        row, col = TB_CLASSES.index(cl1) + DSET_CUTOFFS[d1], TB_CLASSES.index(cl2) + DSET_CUTOFFS[d2]
         ret_arr[row, col] = value
     return ret_arr
 
@@ -119,8 +131,8 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2):
 def get_frechet_arrs(mean_dicts: dict, cov_dicts: dict, key: int) -> (np.ndarray, np.ndarray):
     """Method to calculate the between all pairs of clusters"""
     frechet_dict = collections.defaultdict(float)
-    for src_dset in ['toybox_train', 'in12_train']:
-        for trgt_dset in ['toybox_train', 'in12_train']:
+    for src_dset in DATASETS:
+        for trgt_dset in DATASETS:
             for src_cl in TB_CLASSES:
                 mu1, sigma1 = mean_dicts[key][(src_dset, src_cl)], cov_dicts[key][(src_dset, src_cl)]
                 for trgt_cl in TB_CLASSES:
@@ -130,11 +142,12 @@ def get_frechet_arrs(mean_dicts: dict, cov_dicts: dict, key: int) -> (np.ndarray
 
     frechet_arr = get_arr_from_dict(src_dict=frechet_dict)
     normalized_frechet_arr = normalize_2d_arr(arr=frechet_arr)
-    return frechet_arr, normalized_frechet_arr
+    return frechet_dict, frechet_arr, normalized_frechet_arr
 
 
 class PCAUtil:
     """Class definition for the principal components analysis utility model."""
+
     def __init__(self, src_activations, n_components=None):
         self.src_activations = src_activations
         self.n_components = n_components
@@ -203,8 +216,8 @@ def get_explained_var_arr(activation_dicts, key, threshold=None, n_components=No
     except AssertionError:
         raise ValueError(f'One of threshold or n_components must be set, but got {threshold} and {n_components}')
     ve_dict = collections.defaultdict(float)
-    for src_dset in ['toybox_train', 'in12_train']:
-        for trgt_dset in ['toybox_train', 'in12_train']:
+    for src_dset in DATASETS:
+        for trgt_dset in DATASETS:
             for src_cl in TB_CLASSES:
                 src_activations = activation_dicts[key][(src_dset, src_cl)]
                 src_pca = PCAUtil(src_activations)
@@ -224,8 +237,8 @@ def get_explained_var_arr(activation_dicts, key, threshold=None, n_components=No
 def get_aucs_arr(activation_dicts, key, n_components=None):
     """Method to calculate the explained variance AUC from the source cluster PCA for all target clusters"""
     auc_dict = collections.defaultdict(float)
-    for src_dset in ['toybox_train', 'in12_train']:
-        for trgt_dset in ['toybox_train', 'in12_train']:
+    for src_dset in DATASETS:
+        for trgt_dset in DATASETS:
             for src_cl in TB_CLASSES:
                 src_activations = activation_dicts[key][(src_dset, src_cl)]
                 src_pca = PCAUtil(src_activations=src_activations, n_components=n_components)
