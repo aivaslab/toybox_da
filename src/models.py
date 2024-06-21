@@ -176,7 +176,7 @@ class MTLModel:
 class DualSSLModel:
     """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
 
-    def __init__(self, network, src_loader, trgt_loader, logger, no_save, decoupled):
+    def __init__(self, network, src_loader, trgt_loader, logger, no_save, decoupled, alpha=0.5):
         self.network = network
         self.src_loader = utils.ForeverDataLoader(src_loader)
         self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
@@ -185,6 +185,7 @@ class DualSSLModel:
         self.network.freeze_train()
         self.no_save = no_save
         self.decoupled = decoupled
+        self.alpha = alpha
 
         num_params_trainable, num_params = self.network.count_trainable_parameters()
         self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
@@ -220,7 +221,7 @@ class DualSSLModel:
                 trgt_logits, trgt_labels = utils.info_nce_loss(features=trgt_feats, temp=0.5)
                 trgt_loss = criterion(trgt_logits, trgt_labels)
 
-            loss = 1.0 * src_loss + 1.0 * trgt_loss
+            loss = self.alpha * src_loss + (1.0 - self.alpha) * trgt_loss
             loss.backward()
 
             optimizer.step()
@@ -233,11 +234,11 @@ class DualSSLModel:
             num_batches += 1
             if 0 <= step - halfway < 1:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                                 "T: {:.2f}s".format(
+                                 "SSL: {:.3f}  T: {:.2f}s".format(
                                     ep, ep_total, step, steps,
                                     optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                                     src_loss_total / num_batches, trgt_loss_total / num_batches,
-                                    time.time() - start_time)
+                                    ssl_loss_total / num_batches, time.time() - start_time)
                                  )
 
             if not self.no_save:
@@ -262,11 +263,11 @@ class DualSSLModel:
                     global_step=(ep - 1) * steps + num_batches,
                 )
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                         "T: {:.2f}s".format(
+                         "SSL: {:.3f}  T: {:.2f}s".format(
                             ep, ep_total, steps, steps,
                             optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                             src_loss_total / num_batches, trgt_loss_total / num_batches,
-                            time.time() - start_time)
+                            ssl_loss_total / num_batches, time.time() - start_time)
                          )
 
 

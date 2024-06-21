@@ -35,6 +35,7 @@ def get_parser():
     parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
     parser.add_argument("--decoupled", action='store_true', default=False, help="This flag allows us  to use "
                                                                                 "decoupled contrastive loss")
+    parser.add_argument("--alpha", "-a", default=0.5, type=float, help="Weight of TB contrastive loss in total loss")
 
     return vars(parser.parse_args())
 
@@ -48,6 +49,7 @@ def main():
     no_save = exp_args['no_save']
     save_dir = exp_args['save_dir']
     decoupled_loss = exp_args['decoupled']
+    alpha = exp_args['alpha']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
     gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
@@ -104,7 +106,7 @@ def main():
     else:
         net = networks.ResNet18SSL()
     ssl_model = models.DualSSLModel(network=net, src_loader=tb_loader_train, trgt_loader=in12_loader_train,
-                                    logger=logger, no_save=no_save, decoupled=decoupled_loss)
+                                    logger=logger, no_save=no_save, decoupled=decoupled_loss, alpha=alpha)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
     optimizer.add_param_group({'params': net.ssl_head.parameters(), 'lr': exp_args['lr']})
