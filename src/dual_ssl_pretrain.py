@@ -29,13 +29,20 @@ def get_parser():
     parser.add_argument("-wd", "--wd", default=1e-5, type=float, help="Weight decay for optimizer")
     parser.add_argument("--log", choices=['debug', 'info', 'warning', 'error', 'critical'], default='info',
                         help="Set the log level for the experiment", type=str)
+    parser.add_argument("--final", "-f", default=False, action="store_true", help="Use this flag to run the final "
+                                                                                  "experiment")
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
     parser.add_argument("--no-save", action='store_true', default=False, help="Use this option to disable saving")
     parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
+    parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of saving models")
     parser.add_argument("--decoupled", action='store_true', default=False, help="This flag allows us  to use "
                                                                                 "decoupled contrastive loss")
     parser.add_argument("--alpha", "-a", default=0.5, type=float, help="Weight of TB contrastive loss in total loss")
+    parser.add_argument("--tb-ssl-type", default="object", choices=['self', 'transform', 'object', 'class'],
+                        help="Type of ssl for Toybox")
+    parser.add_argument("--in12-ssl-type", default="self", choices=['self', 'class'], help="Type of ssl for IN-12")
+
 
     return vars(parser.parse_args())
 
@@ -50,6 +57,10 @@ def main():
     save_dir = exp_args['save_dir']
     decoupled_loss = exp_args['decoupled']
     alpha = exp_args['alpha']
+    hypertune = not exp_args['final']
+    tb_ssl_type = exp_args['tb_ssl_type']
+    in12_ssl_type = exp_args['in12_ssl_type']
+    save_freq = exp_args['save_freq']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
     gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
@@ -63,7 +74,12 @@ def main():
                                               transforms.RandomHorizontalFlip(),
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
-    in12_data_train = datasets.DatasetIN12SSL(transform=in12_transform_train, fraction=1.0, hypertune=True)
+
+    if in12_ssl_type == 'class':
+        in12_data_train = datasets.IN12CategorySSLWithLabels(transform=in12_transform_train, fraction=1.0,
+                                                             hypertune=hypertune)
+    else:
+        in12_data_train = datasets.IN12SSLWithLabels(transform=in12_transform_train, hypertune=hypertune)
     in12_loader_train = torchdata.DataLoader(in12_data_train, batch_size=exp_args['bsize'], shuffle=True,
                                              num_workers=workers, pin_memory=True, persistent_workers=True,
                                              drop_last=True)
@@ -78,7 +94,7 @@ def main():
                                             transforms.ToTensor(),
                                             transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)])
     tb_data_train = datasets.ToyboxDatasetSSL(rng=np.random.default_rng(0), transform=tb_transform_train,
-                                              fraction=1.0, hypertune=True, distort='object')
+                                              fraction=1.0, hypertune=hypertune, distort=tb_ssl_type)
     tb_loader_train = torchdata.DataLoader(tb_data_train, batch_size=exp_args['bsize'], shuffle=True,
                                            num_workers=workers, pin_memory=True, persistent_workers=True,
                                            drop_last=True)
@@ -87,11 +103,8 @@ def main():
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
         OUT_DIR + save_dir + "/"
     assert not os.path.isdir(tb_path), f"{tb_path} already exists.."
-    tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
+    tb_writer = tb.SummaryWriter(log_dir=tb_path+"tensorboard/") if not no_save else None
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
-
-    if not no_save:
-        logger.info("Experimental details and results saved to {}".format(tb_path))
 
     # print(utils.online_mean_and_sd(trgt_loader_test))
 
@@ -118,12 +131,22 @@ def main():
                                                                schedulers=[warmup_scheduler, decay_scheduler],
                                                                milestones=[2 * steps + 1])
 
+    if not no_save:
+        logger.info("Experimental details and results saved to {}".format(tb_path))
+        net.save_model(fpath=tb_path + "initial_model.pt")
+        if save_freq > 0:
+            net.save_model(fpath=tb_path + "model_epoch_0.pt")
+
     for ep in range(1, num_epochs + 1):
         ssl_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                         ep=ep, ep_total=num_epochs, writer=tb_writer)
+        if not no_save and save_freq > 0 and ep % save_freq == 0:
+            net.save_model(fpath=tb_path + f"model_epoch_{ep}.pt")
 
     if not no_save:
         net.save_model(fpath=tb_path + "final_model.pt")
+        if save_freq > 0:
+            net.save_model(fpath=tb_path + f"model_epoch_{num_epochs}.pt")
         tb_writer.close()
 
         exp_args['start_time'] = start_time.strftime("%b %d %Y %H:%M")

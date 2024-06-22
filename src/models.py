@@ -204,7 +204,7 @@ class DualSSLModel:
             optimizer.zero_grad()
 
             src_idx, src_images = self.src_loader.get_next_batch()
-            trgt_idx, trgt_images = self.trgt_loader.get_next_batch()
+            trgt_idx, trgt_images, trgt_labels = self.trgt_loader.get_next_batch()
             src_images, trgt_images = torch.cat(src_images, dim=0), torch.cat(trgt_images, dim=0)
             images = torch.concat([src_images, trgt_images], dim=0)
             images = images.cuda()
