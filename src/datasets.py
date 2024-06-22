@@ -260,7 +260,8 @@ class DatasetIN12SSL(DatasetIN12):
 
 class IN12SSLWithLabels(DatasetIN12):
     """
-    This class can be used to load IN-12 data in PyTorch for SimCLR/BYOL-like methods
+    This class can be used to load IN-12 data in PyTorch for SimCLR/BYOL-like methods. In addition to the
+    positive image pair, this class returns the category for the images as well.
     """
     
     def __init__(self, transform=None, fraction=1.0, hypertune=True, equal_div=True):
@@ -279,6 +280,41 @@ class IN12SSLWithLabels(DatasetIN12):
         
         return (index, actual_index), imgs, label
     
+    def __str__(self):
+        return "IN12 SSL With Labels"
+
+
+class IN12CategorySSLWithLabels(DatasetIN12):
+    """
+    This class can be used to load IN-12 data in PyTorch for SimCLR/BYOL-like methods. The positive pairs
+    are different instances from the same class.
+    """
+    def __init__(self, transform=None, fraction=1.0, hypertune=True, equal_div=True, seed=None):
+        super().__init__(train=True, transform=transform, fraction=fraction, hypertune=hypertune,
+                         equal_div=equal_div)
+        self.num_images_per_category = len(self.selected_indices) // 12
+        if seed is None:
+            self.seed = int.from_bytes(os.urandom(16), byteorder='big')
+        self.rng = np.random.default_rng(seed=self.seed)
+
+    def __getitem__(self, index):
+        actual_index = self.selected_indices[index]
+        img_1 = np.array(cv2.imdecode(self.images[actual_index], 3))
+        img_1 = cv2.cvtColor(img_1, cv2.COLOR_BGR2RGB)
+        label_1 = int(self.labels[actual_index]["Class ID"])
+        st_idx, end_idx = label_1 * self.num_images_per_category, (label_1+1) * self.num_images_per_category
+        idx2 = self.rng.integers(st_idx, end_idx, size=1)[0]
+        img_2 = np.array(cv2.imdecode(self.images[idx2], 3))
+        img_2 = cv2.cvtColor(img_2, cv2.COLOR_BGR2RGB)
+        label_2 = int(self.labels[idx2]["Class ID"])
+        assert label_1 == label_2
+        if self.transform is not None:
+            imgs = [self.transform(img_1), self.transform(img_2)]
+        else:
+            imgs = [img_1, img_2]
+
+        return (index, actual_index), imgs, label_1
+
     def __str__(self):
         return "IN12 SSL With Labels"
 
