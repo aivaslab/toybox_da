@@ -54,6 +54,8 @@ def get_parser():
                         default="info", type=str)
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--model-name", default="final_model.pt", type=str,
+                        help="Use this option to specify the name of the model from which weights should be loaded")
     parser.add_argument("--pretrained", default=False, action='store_true',
                         help="Use this flag to start from network pretrained on ILSVRC")
     parser.add_argument("--no-save", default=False, action='store_true', help="Use this flag to not save anything.")
@@ -159,7 +161,8 @@ def main():
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
     
     if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
-        load_file_path = exp_args['load_path'] + "final_model.pt"
+        load_file_path = exp_args['load_path'] + exp_args['model_name']
+        assert os.path.isfile(load_file_path), f"Tried to load weights from {load_file_path}, but does not exist..."
         load_file = torch.load(load_file_path)
         logger.info(f"Loading model weights from {load_file_path} ({load_file['type']})")
         bb_wts = load_file['backbone']

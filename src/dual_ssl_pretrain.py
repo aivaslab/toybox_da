@@ -38,12 +38,16 @@ def get_parser():
     parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of saving models")
     parser.add_argument("--decoupled", action='store_true', default=False, help="This flag allows us  to use "
                                                                                 "decoupled contrastive loss")
-    parser.add_argument("--alpha", "-a", default=0.5, type=float, help="Weight of TB contrastive loss in total loss")
-    parser.add_argument("--tb-ssl-type", default="object", choices=['self', 'transform', 'object', 'class'],
+    parser.add_argument("--tb-alpha", "-tba", default=1.0, type=float, help="Weight of TB contrastive loss in total "
+                                                                           "loss")
+    parser.add_argument("--in12-alpha", "-in12a", default=1.0, type=float, help="Weight of IN-12 contrastive loss in "
+                                                                                "total loss")
+    parser.add_argument("--tb-ssl-type", "-tbssl", default="object", choices=['self', 'transform', 'object', 'class'],
                         help="Type of ssl for Toybox")
-    parser.add_argument("--in12-ssl-type", default="self", choices=['self', 'class'], help="Type of ssl for IN-12")
-
-
+    parser.add_argument("--in12-ssl-type", "-in12ssl", default="self", choices=['self', 'class'],
+                        help="Type of ssl for IN-12")
+    parser.add_argument("--combined", "-c", default=False, action='store_true', help="Use this flag for combined SSL "
+                                                                                     "training")
     return vars(parser.parse_args())
 
 
@@ -56,11 +60,13 @@ def main():
     no_save = exp_args['no_save']
     save_dir = exp_args['save_dir']
     decoupled_loss = exp_args['decoupled']
-    alpha = exp_args['alpha']
+    tb_alpha = exp_args['tb_alpha']
+    in12_alpha = exp_args['in12_alpha']
     hypertune = not exp_args['final']
     tb_ssl_type = exp_args['tb_ssl_type']
     in12_ssl_type = exp_args['in12_ssl_type']
     save_freq = exp_args['save_freq']
+    combined = exp_args['combined']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
     gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
@@ -119,9 +125,11 @@ def main():
     else:
         net = networks.ResNet18SSL()
     ssl_model = models.DualSSLModel(network=net, src_loader=tb_loader_train, trgt_loader=in12_loader_train,
-                                    logger=logger, no_save=no_save, decoupled=decoupled_loss, alpha=alpha)
+                                    logger=logger, no_save=no_save, decoupled=decoupled_loss,
+                                    tb_alpha=tb_alpha, in12_alpha=in12_alpha, combined=combined)
 
-    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
+    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
+                                momentum=0.9, nesterov=True)
     optimizer.add_param_group({'params': net.ssl_head.parameters(), 'lr': exp_args['lr']})
 
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
