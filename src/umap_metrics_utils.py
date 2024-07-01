@@ -237,7 +237,15 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
     # print(grid_points.shape, zz.shape)
     zz = zz.reshape(grid_xx.shape[0], -1)
     fig, ax = plt.subplots(figsize=(16, 9))
-    cont = ax.contourf(grid_xx, grid_yy, zz, levels=100, cmap='viridis_r', vmin=-1000)
+    cntr_levels = [
+        # -10000, -9000, -8000, -7000, -6000, -5000, -4000, -3000, -2000, -1000,
+                   -1000, -900, -800, -700, -600, -500, -400, -300, -200, -100,
+                   -90, -80, -70, -60, -50, -40, -30, -20, -10, -7.5, -5, -2.5,
+                   0, 5, 10, 20]
+    a = np.linspace(0, 1, len(cntr_levels))
+    import matplotlib as mpl
+    colors = mpl.colormaps['coolwarm'](a)
+    cont = ax.contourf(grid_xx, grid_yy, zz, levels=cntr_levels, colors=colors) #, cmap='coolwarm')
     fig.colorbar(cont, ax=ax, orientation='vertical', location='right')
     # plt.axis('scaled')
     ax.set_title(f"KDE ({dataset}-{cl})")
@@ -245,9 +253,26 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
     kde_out_path = img_path + f"images/kde/{dataset}/"
     os.makedirs(kde_out_path, exist_ok=True)
     plt.savefig(fname=kde_out_path + f"{cl}_kde.png", bbox_inches='tight')
-    ax.scatter(train_data[:, 0], train_data[:, 1], marker='o', c='white', alpha=0.1)
+    ax.scatter(train_data[:, 0], train_data[:, 1], marker='o', c='white', alpha=0.2)
     plt.savefig(fname=kde_out_path + f"{cl}_kde_with_points.png", bbox_inches='tight')
     plt.close()
+
+    for eval_cl in TB_CLASSES:
+        out_path = kde_out_path + cl + "/"
+        fig, ax = plt.subplots(figsize=(16, 9))
+        a = np.linspace(0, 1, len(cntr_levels))
+        colors = mpl.colormaps['coolwarm'](a)
+        cont = ax.contourf(grid_xx, grid_yy, zz, levels=cntr_levels, colors=colors)  # , cmap='coolwarm')
+        fig.colorbar(cont, ax=ax, orientation='vertical', location='right')
+        # plt.axis('scaled')
+        ax.set_title(f"KDE ({dataset}-{eval_cl})")
+
+        os.makedirs(out_path, exist_ok=True)
+        eval_points = all_points[(dataset, eval_cl)]
+        eval_data = np.array(eval_points)
+        ax.scatter(eval_data[:, 0], eval_data[:, 1], marker='o', c='black', alpha=0.2)
+        plt.savefig(fname=out_path + f"{eval_cl}.png", bbox_inches='tight')
+        plt.close()
     # plt.imshow(zz, cmap='viridis_r')
     # plt.colorbar()
     # plt.show()
@@ -402,20 +427,27 @@ def make_ll_tbl(save_path, dic):
     np.savetxt(save_path+"ll.csv", arr, delimiter=',')
 
     pd.options.display.float_format = '{:.2f}'.format
-    arr_df = pd.DataFrame(arr[:len(TB_CLASSES), :len(TB_CLASSES)],
-                          columns=list(map(lambda x: "TB Tr " + x, TB_CLASSES)))
+    arr_df = pd.DataFrame(arr[:len(TB_CLASSES), :len(TB_CLASSES)], columns=TB_CLASSES)
+    arr_df.index = TB_CLASSES
+    print("Toybox Train")
     print(tabulated(arr_df))
 
     arr_df = pd.DataFrame(arr[len(TB_CLASSES):2 * len(TB_CLASSES), len(TB_CLASSES):2 * len(TB_CLASSES)],
-                          columns=list(map(lambda x: "TB Te " + x, TB_CLASSES)))
+                          columns=TB_CLASSES)
+    arr_df.index = TB_CLASSES
+    print("Toybox Test")
     print(tabulated(arr_df))
 
     arr_df = pd.DataFrame(arr[2 * len(TB_CLASSES):3 * len(TB_CLASSES), 2 * len(TB_CLASSES):3 * len(TB_CLASSES)],
-                          columns=list(map(lambda x: "IN Tr " + x, TB_CLASSES)))
+                          columns=TB_CLASSES)
+    arr_df.index = TB_CLASSES
+    print("IN-12 Train")
     print(tabulated(arr_df))
 
     arr_df = pd.DataFrame(arr[3 * len(TB_CLASSES):4 * len(TB_CLASSES), 3 * len(TB_CLASSES):4 * len(TB_CLASSES)],
-                          columns=list(map(lambda x: "IN Te " + x, TB_CLASSES)))
+                          columns=TB_CLASSES)
+    arr_df.index = TB_CLASSES
+    print("IN-12 Test")
     print(tabulated(arr_df))
     
     arr = np.zeros(shape=(4, 12), dtype=float)
@@ -732,7 +764,7 @@ def get_scatter_plots_acc(accs, tb_dict, in12_dict, title, use_size_scale=True):
             tb_avg_avg[model_name].append(tb_dict[model_name][i][3])
             tb_max_avg[model_name].append(tb_dict[model_name][i][5] if data_arr[i][5] > 0.1 else 1.0)
 
-    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex='col', sharey='col')
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(17, 16), sharex='col', sharey='col')
     for model_name in in12_dict.keys():
         if model_name.endswith("_pre"):
             ax[0][0].scatter(y=tb_avg_avg[model_name], x=in12_avg_avg[model_name], label=model_name[:-4],
