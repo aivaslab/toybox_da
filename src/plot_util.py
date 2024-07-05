@@ -21,9 +21,8 @@ COLORS = {
 }
 
 
-
-def plot_heatmap_2(arrs, xlabels, ylabels, title):
-    fig, ax = plt.subplots(figsize=(12, 10))
+def plot_heatmap_2(arrs, xlabels, ylabels, title, size=(12, 10)):
+    fig, ax = plt.subplots(figsize=size)
     sns.heatmap(data=arrs, annot=True, cbar=True, vmin=0.0, vmax=1.0, square=True, ax=ax)
     ax.set_xticks(np.arange(0.5, len(xlabels) + 0.5, 1), labels=xlabels, rotation=90)
     ax.set_yticks(np.arange(0.5, len(ylabels) + 0.5, 1), labels=ylabels, rotation=0)

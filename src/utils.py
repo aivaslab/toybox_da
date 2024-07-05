@@ -7,6 +7,7 @@ import logging
 import torch.nn.functional as F
 import torch.nn as nn
 from typing import Tuple
+from PIL import Image
 
 
 COLOR = {
@@ -321,6 +322,30 @@ def online_mean_and_sd(loader):
     return fst_moment, torch.sqrt(snd_moment - fst_moment ** 2)
 
 
+def concat_images_horizontally(images, gap=5):
+    """Concatenate images in the list horizontally"""
+    num_images = len(images)
+    h, w = images[0].height, images[1].width
+    height, width = h, num_images * w + (num_images + 1) * gap
+    dst = Image.new('RGB', (width, height), (0, 0, 0))
+    for idx, image in enumerate(images):
+        dst.paste(image, ((idx + 1) * gap + idx * w, 0))
+
+    return dst
+
+
+def concat_images_vertically(images, gap=5):
+    """Concatenate images in the list vertically"""
+    num_images = len(images)
+    h, w = images[0].height, images[1].width
+    height, width = num_images * h + (num_images + 1) * gap, w
+    dst = Image.new('RGB', (width, height), (0, 0, 0))
+    for idx, image in enumerate(images):
+        dst.paste(image, (0, (idx + 1) * gap + idx * h))
+
+    return dst
+
+
 def get_images(images, mean, std, aug=True):
     """
     Return images from the tensor provided.
@@ -338,8 +363,6 @@ def get_images(images, mean, std, aug=True):
     for img_idx in range(len(images)):
         pil_img1 = tr(images[img_idx])
         ims1.append(pil_img1)
-    
-    import PIL.Image as Image
     
     def get_concat_h_blank(im1, im2, color=(0, 0, 0)):
         """hconcat images"""

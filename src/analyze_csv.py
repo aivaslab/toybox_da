@@ -53,6 +53,7 @@ class CSVUtil:
         for cl in range(num_classes):
             for cl2 in range(num_classes):
                 conf_matrix[cl][cl2] /= cntr[cl]
+                conf_matrix[cl][cl2] = round(conf_matrix[cl][cl2], 2)
 
         return cntr, conf_matrix
 
