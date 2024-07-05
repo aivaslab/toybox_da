@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 import os
 import datetime
+import csv
 
 import torch
 import torch.utils.data as torchdata
@@ -35,6 +36,43 @@ def get_train_test_acc(model, src_train_loader, src_test_loader, writer: tb.Summ
     return src_tr_acc, src_te_acc
 
 
+def save_model_prediction_val(model, all_loaders, out_path: str, logger):
+    os.makedirs(out_path, exist_ok=True)
+    all_losses_dict = {}
+    all_labels_dict = {}
+    all_preds_dict = {}
+
+    for loader_name, loader in all_loaders.items():
+
+        # Get losses, labels and predictions for current dataloader
+        all_losses_dict[loader_name] = model.get_val_loss_dict(loader=loader, loader_name=loader_name)
+        all_labels_dict[loader_name], all_preds_dict[loader_name] = model.get_eval_dicts(loader=loader,
+                                                                                         loader_name=loader_name)
+
+        # Assert keys are the same in different dicts
+        for key in all_losses_dict[loader_name]:
+            try:
+                assert key in all_labels_dict[loader_name] and key in all_preds_dict[loader_name]
+            except AssertionError:
+                print(f'Warning:key {key} not found in {loader_name}')
+        assert len(all_losses_dict[loader_name].keys()) == len(all_preds_dict[loader_name].keys())
+        assert len(all_labels_dict[loader_name].keys()) == len(all_preds_dict[loader_name].keys())
+
+        # Create and write output to specified CSV file
+        csv_fpath = out_path + loader_name + ".csv"
+        logger.info(f"Saving prediction and loss data to {csv_fpath}")
+        csv_fp = open(csv_fpath, "w")
+        csv_writer = csv.writer(csv_fp)
+        csv_writer.writerow(["Index", 'Label', 'Prediction', 'Accuracy', 'Loss'])
+        keys = sorted(list(all_losses_dict[loader_name].keys()))
+        labels_dict, preds_dict, losses_dict = all_labels_dict[loader_name], all_preds_dict[loader_name], \
+            all_losses_dict[loader_name]
+        for key in keys:
+            label, pred, loss = labels_dict[key], preds_dict[key], losses_dict[key]
+            csv_writer.writerow([key, label, pred, 1 if label == pred else 0, loss])
+        csv_fp.close()
+
+
 def get_parser():
     """Return parser for source pretrain experiments"""
     parser = argparse.ArgumentParser(description="")
@@ -59,6 +97,7 @@ def get_parser():
     parser.add_argument("--pretrained", default=False, action='store_true',
                         help="Use this flag to start from network pretrained on ILSVRC")
     parser.add_argument("--no-save", default=False, action='store_true', help="Use this flag to not save anything.")
+    parser.add_argument("--save-dir", default="", type=str, help="Directory to save the model")
     return vars(parser.parse_args())
 
 
@@ -75,7 +114,7 @@ def main():
     """Main method"""
     
     exp_args = get_parser()
-    exp_args['seed'] = None if exp_args['seed'] == -1 else exp_args['seed']
+    exp_args['seed'] = 0 if exp_args['seed'] == -1 else exp_args['seed']
     num_epochs = exp_args['epochs']
     steps = exp_args['iters']
     b_size = exp_args['bsize']
@@ -84,9 +123,12 @@ def main():
     num_instances = exp_args['instances']
     num_images_per_class = exp_args['images']
     no_save = exp_args['no_save']
+    save_dir = exp_args['save_dir']
     
     start_time = datetime.datetime.now()
-    tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
+    tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
+        OUT_DIR + save_dir + "/"
+    assert not os.path.isdir(tb_path), f"Directory {tb_path} already exists..."
     tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
     
@@ -159,6 +201,9 @@ def main():
     
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
+
+    if not no_save:
+        logger.info("Experimental details and results saved to {}".format(tb_path))
     
     if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
         load_file_path = exp_args['load_path'] + exp_args['model_name']
@@ -210,6 +255,14 @@ def main():
         exp_args['train_transform'] = str(src_transform_train)
         save_args(path=tb_path, args=exp_args)
         logger.info("Experimental details and results saved to {}".format(tb_path))
+        train_loader_name = "tb_train" if exp_args['dataset'] == "toybox" else "in12_train"
+        test_loader_name = "tb_test" if exp_args['dataset'] == "toybox" else "in12_test"
+        all_loaders = {
+            train_loader_name: src_loader_train,
+            test_loader_name: src_loader_test
+        }
+        save_model_prediction_val(model=pre_model, all_loaders=all_loaders, out_path=tb_path+"output/final_model/",
+                                  logger=logger)
 
 
 if __name__ == "__main__":
