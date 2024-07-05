@@ -7,7 +7,6 @@ import pandas as pd
 import math
 import networkx as nx
 from scipy.spatial import ConvexHull
-from scipy import stats
 import matplotlib as mpl
 from matplotlib.patches import ConnectionPatch
 from tabulate import tabulate
@@ -24,10 +23,10 @@ TB_CLASSES = ['airplane', 'ball', 'car', 'cat', 'cup', 'duck',
               'giraffe', 'horse', 'helicopter', 'mug', 'spoon', 'truck']
 DATASETS = ["tb_train", "tb_test", "in12_train", "in12_test"]
 DSET_CUTOFFS = {
-    'tb_train'   : 0,
-    'tb_test'    : 12,
-    'in12_train' : 24,
-    'in12_test'  : 36
+    'tb_train':   0,
+    'tb_test':    12,
+    'in12_train': 24,
+    'in12_test':  36
 }
 
 SRC_FILES = {
@@ -108,20 +107,20 @@ def build_and_compute_mst(path, dataset, target_cl, points):
             
     mst = nx.minimum_spanning_tree(graph)
 
-    fig, ax = plt.subplots(1, 1)  # or what ever layout you want
-    ax.set_xlim(min_x, max_x)
-    ax.set_ylim(min_y, max_y)
-    nx.draw_networkx(mst, pos=node_dic, with_labels=False, node_size=10, ax=ax)
-    plt.savefig(scatter_out_path + "{}_mst_nx.png".format(target_cl))
-    plt.close()
+    fig, ax = plt.subplots(1, 4, sharex=True, sharey=True, figsize=(24, 5))  # or what ever layout you want
+    ax[0].set_xlim(min_x, max_x)
+    ax[0].set_ylim(min_y, max_y)
+    ax[0].set_title("MST of all datapoints")
+    nx.draw_networkx(mst, pos=node_dic, with_labels=False, node_size=10, ax=ax[0])
     
     edge_weights = []
     for edge in mst.edges():
         u, v = edge
         dist = math.sqrt((points[u][0] - points[v][0]) ** 2 + (points[u][1] - points[v][1]) ** 2)
         edge_weights.append(dist)
-    quantiles = np.quantile(edge_weights, [0.025, 0.975])
+    quantiles = np.quantile(edge_weights, [0.05, 0.95])
     threshold = quantiles[1] + 1.5 * (quantiles[1] - quantiles[0])
+
     removed_edges = []
     for edge in mst.edges():
         u, v = edge
@@ -132,26 +131,36 @@ def build_and_compute_mst(path, dataset, target_cl, points):
     for e in removed_edges:
         mst.remove_edge(e[0], e[1])
     
-    fig, ax = plt.subplots(1, 1)
-    ax.set_xlim(min_x, max_x)
-    ax.set_ylim(min_y, max_y)
-    nx.draw_networkx(mst, pos=node_dic, with_labels=False, node_size=10, ax=ax)
-    plt.savefig(scatter_out_path + "{}_mst_thres.png".format(target_cl))
-    plt.close()
+    nx.draw_networkx(mst, pos=node_dic, with_labels=False, node_size=10, ax=ax[1])
+    ax[1].set_title("MST of all datapoints (edges above threshold removed)")
     
     largest_cc = max(nx.connected_components(mst), key=len)
     largest_cc_g = mst.subgraph(largest_cc).copy()
 
-    fig, ax = plt.subplots(1, 1)
-    ax.set_xlim(min_x, max_x)
-    ax.set_ylim(min_y, max_y)
-    nx.draw_networkx(largest_cc_g, pos=node_dic, with_labels=False, node_size=10, ax=ax)
-    plt.savefig(scatter_out_path + "{}_largest_cc.png".format(target_cl))
+    nx.draw_networkx(largest_cc_g, pos=node_dic, with_labels=False, node_size=10, ax=ax[2])
+    ax[2].set_title("Largest connected component")
+
+    new_mst = mst.copy()
+    cc_rem_threshold = 5
+    removed_cc = []
+    all_cc = nx.connected_components(mst)
+    for cc in all_cc:
+        if len(cc) < cc_rem_threshold:
+            removed_cc.append(cc)
+    # print(removed_cc)
+    for cc in removed_cc:
+        for node in cc:
+            new_mst.remove_node(node)
+
+    nx.draw_networkx(new_mst, pos=node_dic, with_labels=False, node_size=10, ax=ax[3])
+    ax[3].set_title("All connected components with >= 5 nodes")
+    plt.savefig(scatter_out_path + "{}_scatter.png".format(target_cl), bbox_inches='tight')
     plt.close()
-    
-    ll = set(list(largest_cc_g.nodes))
-    return ll
-    # print(largest_cc)
+
+    # print(dataset, target_cl, mst.number_of_nodes(), largest_cc_g.number_of_nodes(), new_mst.number_of_nodes())
+    largest_cc_points = set(list(largest_cc_g.nodes))
+    all_cc_points = set(list(new_mst.nodes))
+    return largest_cc_points, all_cc_points
 
 
 def convex_hull(path, dataset, target_cl, points):
@@ -172,42 +181,7 @@ def convex_hull(path, dataset, target_cl, points):
     plt.savefig(scatter_out_path + "{}_hull.png".format(target_cl))
     plt.close()
     return hull_area, hull.vertices
-    
-    
-def get_intersection(hull_1, hull_2):
-    from SH import PolygonClipper
-    poly1, poly2 = np.array(hull_1), np.array(hull_2)
-    clip = PolygonClipper(warn_if_empty=True)
-    clipped_poly = clip(poly1, poly2)
-    # print(poly1.shape, poly2.shape, clipped_poly.shape)
 
-
-def kde(path, dataset, target_cl, m1, m2):
-    xmin = min(m1)
-    xmax = max(m1)
-    ymin = min(m2)
-    ymax = max(m2)
-    X, Y = np.mgrid[xmin:xmax:100j, ymin:ymax:100j]
-    positions = np.vstack([X.ravel(), Y.ravel()])
-    values = np.vstack([m1, m2])
-    kernel = stats.gaussian_kde(values)
-    Z = np.reshape(kernel(positions).T, X.shape)
-    fig, ax = plt.subplots()
-    ax.imshow(np.rot90(Z), cmap=plt.cm.get_cmap('viridis'), extent=[xmin, xmax, ymin, ymax])
-    ax.plot(m1, m2, 'k.', markersize=2)
-    ax.set_xlim([xmin, xmax])
-    ax.set_ylim([ymin, ymax])
-    scatter_out_path = path + "images/scatter/{}/".format(dataset)
-    plt.savefig(scatter_out_path + "{}_kde.png".format(target_cl))
-    plt.close()
-
-
-def compute_kde(path, dataset, target_cl, points):
-    x = [points[i][0] for i in range(len(points))]
-    y = [points[i][1] for i in range(len(points))]
-    
-    kde(path=path, dataset=dataset, target_cl=target_cl, m1=x, m2=y)
-    
     
 def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points, img_path):
     """Get all kde"""
@@ -215,21 +189,20 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
     train_data = np.array(train_points)
     from sklearn.neighbors import KernelDensity
     from sklearn.model_selection import GridSearchCV
-    import time
-    st_time = time.time()
-    bandwidths = 10 ** np.linspace(-5, -1, 20)
+    bandwidths = 10 ** np.linspace(-2, 1, 20)
     grid = GridSearchCV(KernelDensity(kernel='gaussian'),
                         {'bandwidth': bandwidths},
                         cv=5,
                         n_jobs=-1,
-                        verbose=1)
+                        verbose=1, refit=True)
     grid.fit(train_data)
+    print(grid.best_params_)
     kernel = grid.best_estimator_
     kernel.fit(train_data)
     for eval_dset in DATASETS:
         for eval_cl in TB_CLASSES:
             eval_points = all_points[(eval_dset, eval_cl)]
-            eval_data = np.array(eval_points)  # np.vstack([eval_x, eval_y])
+            eval_data = np.array(eval_points)
             eval_likelihood = kernel.score_samples(eval_data)
             ll_dict[(dataset, cl, eval_dset, eval_cl)] = eval_likelihood
 
@@ -243,9 +216,9 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
                    -90, -80, -70, -60, -50, -40, -30, -20, -10, -7.5, -5, -2.5,
                    0, 5, 10, 20]
     a = np.linspace(0, 1, len(cntr_levels))
-    import matplotlib as mpl
     colors = mpl.colormaps['coolwarm'](a)
-    cont = ax.contourf(grid_xx, grid_yy, zz, levels=cntr_levels, colors=colors) #, cmap='coolwarm')
+
+    cont = ax.contourf(grid_xx, grid_yy, zz, levels=cntr_levels, colors=colors)
     fig.colorbar(cont, ax=ax, orientation='vertical', location='right')
     # plt.axis('scaled')
     ax.set_title(f"KDE ({dataset}-{cl})")
@@ -260,8 +233,6 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
     for eval_cl in TB_CLASSES:
         out_path = kde_out_path + cl + "/"
         fig, ax = plt.subplots(figsize=(16, 9))
-        a = np.linspace(0, 1, len(cntr_levels))
-        colors = mpl.colormaps['coolwarm'](a)
         cont = ax.contourf(grid_xx, grid_yy, zz, levels=cntr_levels, colors=colors)  # , cmap='coolwarm')
         fig.colorbar(cont, ax=ax, orientation='vertical', location='right')
         # plt.axis('scaled')
@@ -281,7 +252,7 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
 
 
 def compute_grid_points(all_points):
-    # print("entering compute grid_points")
+    # print("entering compute grid_points", type(all_points))
     xmin, ymin, xmax, ymax = np.inf, np.inf, -np.inf, -np.inf
     for dset in DATASETS:
         for cl in TB_CLASSES:
@@ -308,76 +279,63 @@ def preprocess(path):
     """Prepare umap data"""
     umap_preprocess_for_metrics.normalize(path=path)
     umap_preprocess_for_metrics.generate_scatter_plots(path=path)
-    
-    
-def main(p, norm=True):
-    """Main method"""
 
+
+def remove_outliers(p, norm=True):
+    """Remove outliers and run umap metrics"""
     preprocess(path=p)
     datapoints_dict = {}
-    core_points_dict = {}
+    largest_cc_points_dict = {}
+    all_cc_points_dict = {}
     hull_points_dict = {}
-    likelihood_dict = {}
+
     hull_areas = np.zeros(shape=(4, 12), dtype=float)
-    num_core_points = np.zeros(shape=(4, 12), dtype=int)
+    num_lcc_points = np.zeros(shape=(4, 12), dtype=int)
+    num_acc_points = np.zeros(shape=(4, 12), dtype=int)
     density = np.zeros(shape=(4, 12), dtype=int)
     for dset in DATASETS:
         for tb_cl in TB_CLASSES:
             datapoints = get_points(path=p, dataset=dset, target_cl=tb_cl, norm=norm)
             datapoints_dict[(dset, tb_cl)] = datapoints
             plot_points(path=p, dataset=dset, target_cl=tb_cl, points=datapoints)
-            core_point_idxs = build_and_compute_mst(path=p, dataset=dset, target_cl=tb_cl, points=datapoints)
-            core_points = [datapoints[i] for i in range(len(datapoints)) if i in core_point_idxs]
-            core_points_dict[(dset, tb_cl)] = core_points
-            hull_area, hull_idxs = convex_hull(path=p, dataset=dset, target_cl=tb_cl, points=core_points)
-            hull_points = [core_points[i] for i in range(len(core_points)) if i in hull_idxs]
+            largest_cc_idxs, all_cc_idxs = build_and_compute_mst(path=p, dataset=dset, target_cl=tb_cl,
+                                                                 points=datapoints)
+
+            lcc_points = [datapoints[i] for i in range(len(datapoints)) if i in largest_cc_idxs]
+            largest_cc_points_dict[(dset, tb_cl)] = np.array(lcc_points)
+
+            acc_points = [datapoints[i] for i in range(len(datapoints)) if i in all_cc_idxs]
+            all_cc_points_dict[(dset, tb_cl)] = np.array(acc_points)
+
+            hull_area, hull_idxs = convex_hull(path=p, dataset=dset, target_cl=tb_cl, points=lcc_points)
+            hull_points = [lcc_points[i] for i in range(len(lcc_points)) if i in hull_idxs]
             hull_points_dict[(dset, tb_cl)] = hull_points
-            
+
             ha_row = DSET_CUTOFFS[dset] // 12
             ha_col = TB_CLASSES.index(tb_cl)
             hull_areas[ha_row][ha_col] = hull_area
-            num_core_points[ha_row][ha_col] = len(core_point_idxs)
-            density[ha_row][ha_col] = len(core_point_idxs) / hull_area
-        
-            # compute_kde(points=core_points, path=p, dataset=dset, target_cl=tb_cl)
-            # print(hull_points)
-            # print(type(hull_points), len(hull_points), hull_points[0])
-            # get_intersection(hull_1=hull_points, hull_2=hull_points)
-        
-            # mst(path=p, dataset=dset, target_cl=tb_cl, points=datapoints)
-
-    xx, yy, coords = compute_grid_points(all_points=datapoints_dict)
-
-    for dset in DATASETS:
-        for tb_cl in TB_CLASSES:
-            likelihood_dict = get_all_kde(dataset=dset, cl=tb_cl,
-                                          all_points=datapoints_dict, ll_dict=likelihood_dict,
-                                          grid_xx=xx, grid_yy=yy, grid_points=coords, img_path=p)
-
-    # print(len(list(likelihood_dict.keys())))
+            num_lcc_points[ha_row][ha_col] = len(largest_cc_idxs)
+            num_acc_points[ha_row][ha_col] = len(all_cc_idxs)
+            density[ha_row][ha_col] = len(largest_cc_idxs) / hull_area
 
     data_path = p + "/data/"
     os.makedirs(data_path, exist_ok=True)
     datapoints_fname = data_path + "datapoints.pkl" if not norm else data_path + "datapoints_norm.pkl"
-    corepoints_fname = data_path + "corepoints.pkl" if not norm else data_path + "corepoints_norm.pkl"
+    lcc_points_fname = data_path + "lcc_points.pkl" if not norm else data_path + "lcc_points_norm.pkl"
+    acc_points_fname = data_path + "acc_points.pkl" if not norm else data_path + "acc_points_norm.pkl"
     hullpoints_fname = data_path + "hullpoints.pkl" if not norm else data_path + "hullpoints_norm.pkl"
     datapoints_fp = open(datapoints_fname, "wb")
-    corepoints_fp = open(corepoints_fname, "wb")
+    lcc_points_fp = open(lcc_points_fname, "wb")
+    acc_points_fp = open(acc_points_fname, "wb")
     hullpoints_fp = open(hullpoints_fname, "wb")
     pickle.dump(datapoints_dict, datapoints_fp)
-    pickle.dump(core_points_dict, corepoints_fp)
+    pickle.dump(largest_cc_points_dict, lcc_points_fp)
+    pickle.dump(all_cc_points_dict, acc_points_fp)
     pickle.dump(hull_points_dict, hullpoints_fp)
-    corepoints_fp.close()
+    lcc_points_fp.close()
+    acc_points_fp.close()
     hullpoints_fp.close()
     datapoints_fp.close()
-
-    if norm:
-        ll_fname = data_path + "ll_norm.pkl"
-    else:
-        ll_fname = data_path + "ll.pkl"
-    ll_fp = open(ll_fname, "wb")
-    pickle.dump(likelihood_dict, ll_fp)
-    ll_fp.close()
 
     hull_area_df = pd.DataFrame(hull_areas, columns=TB_CLASSES)
     if norm:
@@ -385,12 +343,18 @@ def main(p, norm=True):
     else:
         hull_area_df.to_csv(data_path + "hull_area.csv")
 
-    num_core_points_df = pd.DataFrame(num_core_points, columns=TB_CLASSES)
+    num_lcc_points_df = pd.DataFrame(num_lcc_points, columns=TB_CLASSES)
     if norm:
-        num_core_points_df.to_csv(data_path + "num_core_points_norm.csv")
+        num_lcc_points_df.to_csv(data_path + "num_lcc_points_norm.csv")
     else:
-        num_core_points_df.to_csv(data_path + "num_core_points.csv")
-    
+        num_lcc_points_df.to_csv(data_path + "num_lcc_points.csv")
+
+    num_acc_points_df = pd.DataFrame(num_acc_points, columns=TB_CLASSES)
+    if norm:
+        num_acc_points_df.to_csv(data_path + "num_acc_points_norm.csv")
+    else:
+        num_acc_points_df.to_csv(data_path + "num_acc_points.csv")
+
     density_df = pd.DataFrame(density, columns=TB_CLASSES)
     if norm:
         density_df.to_csv(data_path + "density_norm.csv")
@@ -403,10 +367,51 @@ def main(p, norm=True):
     else:
         mean_density_df.to_csv(data_path + "mean_density.csv")
     pd.options.display.float_format = '{:.2f}'.format
-    
+
     print("density:\n", tabulated(density_df))
     print("mean_density:\n", mean_density_df)
-    
+
+
+def compute_likelihood_dict(p, norm, outlier_removal):
+    """Calculate the likelihood dict from the datapoints"""
+    assert outlier_removal in ["none", "lcc", "acc"]
+    likelihood_dict, data_path = {}, p + "/data/"
+    all_points_fname = data_path + "datapoints.pkl" if not norm else data_path + "datapoints_norm.pkl"
+    all_points_fp = open(all_points_fname, "rb")
+    all_points_dict = pickle.load(all_points_fp)
+    if outlier_removal == "none":
+        core_points_fname = data_path + "datapoints.pkl" if not norm else data_path + "datapoints_norm.pkl"
+    elif outlier_removal == "lcc":
+        core_points_fname = data_path + "lcc_points.pkl" if not norm else data_path + "lcc_points_norm.pkl"
+    else:
+        core_points_fname = data_path + "acc_points.pkl" if not norm else data_path + "acc_points_norm.pkl"
+    core_points_fp = open(core_points_fname, "rb")
+    core_points_dict = pickle.load(core_points_fp)
+
+    xx, yy, coords = compute_grid_points(all_points=all_points_dict)
+    ll_data_path = p + "ll/raw/" if outlier_removal == "none" else p + f"ll/{outlier_removal}/"
+    for dset in DATASETS:
+        for tb_cl in TB_CLASSES:
+            likelihood_dict = get_all_kde(dataset=dset, cl=tb_cl,
+                                          all_points=core_points_dict, ll_dict=likelihood_dict,
+                                          grid_xx=xx, grid_yy=yy, grid_points=coords, img_path=ll_data_path)
+
+    if norm:
+        ll_fname = ll_data_path + "ll_norm.pkl"
+    else:
+        ll_fname = ll_data_path + "ll.pkl"
+    ll_fp = open(ll_fname, "wb")
+    pickle.dump(likelihood_dict, ll_fp)
+    ll_fp.close()
+
+
+def main(p, norm=True, outlier_removal="none"):
+    """Main method"""
+
+    assert outlier_removal in ["none", "lcc", "acc"]
+    remove_outliers(p=p, norm=norm)
+    compute_likelihood_dict(p=p, norm=norm, outlier_removal=outlier_removal)
+
 
 def tabulated(df):
     """Tabulate a pandas dataframe"""
@@ -716,14 +721,16 @@ def get_scatter_plots_by_model_by_class(accs, data_dict, title, match_points=Tru
             if not model_name.endswith("_pre"):
                 for i, cl in enumerate(TB_CLASSES):
                     con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
-                                          xyB=(avg_avg[model_name][i], accs[model_name][i]), coordsA="data", coordsB="data",
+                                          xyB=(avg_avg[model_name][i], accs[model_name][i]),
+                                          coordsA="data", coordsB="data",
                                           axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name],
                                           alpha=0.2)
 
                     fig.add_artist(con)
 
                     con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
-                                          xyB=(max_avg[model_name][i], accs[model_name][i]), coordsA="data", coordsB="data",
+                                          xyB=(max_avg[model_name][i], accs[model_name][i]),
+                                          coordsA="data", coordsB="data",
                                           axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name],
                                           alpha=0.2)
                     fig.add_artist(con)
@@ -811,6 +818,7 @@ def get_scatter_plots_acc(accs, tb_dict, in12_dict, title, use_size_scale=True):
 
     plt.show()
 
+
 if __name__ == "__main__":
     file_path = "../ICLR_OUT/TB_SUP_IN12_SCRAMBLED/exp_Sep_29_2023_01_09/umap_all_data/umap_200_0.1_euclidean/"
     main(p=file_path)
@@ -824,82 +832,3 @@ if __name__ == "__main__":
     print(file_path)
     
     print("----------------------------------------------------------------------------------------------------")
-
-    file_path = "../ICLR_OUT/TB_SUP_IN12_SCRAMBLED_MMD/exp_Sep_28_2023_06_00/umap_all_data/umap_200_0.1_euclidean/"
-    main(p=file_path)
-
-    dic_fname = file_path + "data/ll.pkl"
-    dpath = file_path + "data/"
-    dic_fp = open(dic_fname, "rb")
-    ll_dic = pickle.load(dic_fp)
-    make_ll_tbl(save_path=dpath, dic=ll_dic)
-    dic_fp.close()
-
-    print(file_path)
-
-    print("----------------------------------------------------------------------------------------------------")
-
-    # file_path = "../ICLR_OUT/TB_IN12_R/exp_Sep_28_2023_16_32/umap_all_data/umap_200_0.1_euclidean/"
-    # main(p=file_path)
-    #
-    # dic_fname = file_path + "data/ll.pkl"
-    # data_path = file_path + "data/"
-    # dic_fp = open(dic_fname, "rb")
-    # ll_dic = pickle.load(dic_fp)
-    # make_ll_tbl(save_path=data_path, dic=ll_dic)
-    # dic_fp.close()
-    #
-    # print(file_path)
-    #
-    # print("----------------------------------------------------------------------------------------------------")
-    # file_path = "../ICLR_OUT/DUAL_SUP_CCMMD/exp_Sep_27_2023_00_42/umap_all_data/umap_200_0.1_euclidean/"
-    # main(p=file_path)
-    #
-    # dic_fname = file_path + "data/ll.pkl"
-    # data_path = file_path + "data/"
-    # dic_fp = open(dic_fname, "rb")
-    # ll_dic = pickle.load(dic_fp)
-    # make_ll_tbl(save_path=data_path, dic=ll_dic)
-    # dic_fp.close()
-    #
-    # print(file_path)
-    #
-    # print("----------------------------------------------------------------------------------------------------")
-    # file_path = "/home/VANDERBILT/sanyald/Documents/AIVAS/Projects/toybox_da/ICLR_OUT/IN12_SUP/" \
-    #             "exp_Sep_25_2023_23_11/umap_all_data/umap_200_0.1_euclidean/"
-    # main(p=file_path)
-    #
-    # dic_fname = file_path + "data/ll.pkl"
-    # data_path = file_path + "data/"
-    # dic_fp = open(dic_fname, "rb")
-    # ll_dic = pickle.load(dic_fp)
-    # make_ll_tbl(save_path=data_path, dic=ll_dic)
-    # dic_fp.close()
-    #
-    # print(file_path)
-    #
-    # print("----------------------------------------------------------------------------------------------------")
-    # file_path = "/home/VANDERBILT/sanyald/Documents/AIVAS/Projects/toybox_da/ICLR_OUT/DUAL_SUP_24/" \
-    #             "exp_Aug_11_2023_10_06/umap_all_data/umap_200_0.1_euclidean/"
-    # main(p=file_path)
-    #
-    # dic_fname = file_path + "data/ll.pkl"
-    # data_path = file_path + "data/"
-    # dic_fp = open(dic_fname, "rb")
-    # ll_dic = pickle.load(dic_fp)
-    # make_ll_tbl(save_path=data_path, dic=ll_dic)
-    # dic_fp.close()
-    #
-    # print("----------------------------------------------------------------------------------------------------")
-    # file_path = "/home/VANDERBILT/sanyald/Documents/AIVAS/Projects/toybox_da/ICLR_OUT/DUAL_SUP_CCMMD/" \
-    #             "exp_Aug_21_2023_14_54/umap_all_data/umap_200_0.1_euclidean/"
-    # main(p=file_path)
-    #
-    # dic_fname = file_path + "data/ll.pkl"
-    # data_path = file_path + "data/"
-    # dic_fp = open(dic_fname, "rb")
-    # ll_dic = pickle.load(dic_fp)
-    # make_ll_tbl(save_path=data_path, dic=ll_dic)
-    # dic_fp.close()
-    #
-    # print("----------------------------------------------------------------------------------------------------")
