@@ -145,9 +145,20 @@ def build_and_compute_mst(path, dataset, target_cl, points):
     cc_rem_threshold = 5
     removed_cc = []
     all_cc = nx.connected_components(mst)
+    num_valid_components = 0
+    valid_component_means = []
+    valid_component_covs = []
     for cc in all_cc:
         if len(cc) < cc_rem_threshold:
             removed_cc.append(cc)
+        else:
+            num_valid_components += 1
+            gmm_points = list(cc)
+            cc_points = np.array([node_dic[gmm_points[i]] for i in range(len(cc))])
+            cc_mean = np.mean(cc_points, axis=0, keepdims=True)
+            cc_cov = np.cov(cc_points, rowvar=False)
+            valid_component_means.append(cc_mean)
+            valid_component_covs.append(cc_cov)
     # print(removed_cc)
     for cc in removed_cc:
         for node in cc:
@@ -161,7 +172,7 @@ def build_and_compute_mst(path, dataset, target_cl, points):
     # print(dataset, target_cl, mst.number_of_nodes(), largest_cc_g.number_of_nodes(), new_mst.number_of_nodes())
     largest_cc_points = set(list(largest_cc_g.nodes))
     all_cc_points = set(list(new_mst.nodes))
-    return largest_cc_points, all_cc_points
+    return largest_cc_points, all_cc_points, valid_component_means, valid_component_covs
 
 
 def convex_hull(path, dataset, target_cl, points):
@@ -184,7 +195,7 @@ def convex_hull(path, dataset, target_cl, points):
     return hull_area, hull.vertices
 
     
-def get_all_kde(model_type, dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points, img_path, **kwargs):
+def get_likelihoods(model_type, dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points, img_path, **kwargs):
     """Get all kde"""
     assert model_type in ['kde', 'gmm']
     train_points = all_points[(dataset, cl)]
@@ -203,11 +214,11 @@ def get_all_kde(model_type, dataset, cl, all_points, ll_dict, grid_xx, grid_yy, 
         model = grid.best_estimator_
         model.fit(train_data)
     else:
-        means, covs = kwargs["means"], kwargs["covs"]
+        means, covs = kwargs["means"][(dataset, cl)], kwargs["covs"][(dataset, cl)]
         precision_matrix = np.linalg.pinv(covs)
         from sklearn.mixture import GaussianMixture
         model = GaussianMixture(n_components=len(means), covariance_type='full', means_init=means,
-                                    precisions_init=precision_matrix)
+                                precisions_init=precision_matrix)
         model.fit(train_data)
 
     for eval_dset in DATASETS:
@@ -227,7 +238,10 @@ def get_all_kde(model_type, dataset, cl, all_points, ll_dict, grid_xx, grid_yy, 
                    -90, -80, -70, -60, -50, -40, -30, -20, -10, -7.5, -5, -2.5,
                    0, 5, 10, 20]
     a = np.linspace(0, 1, len(cntr_levels))
-    colors = mpl.colormaps['coolwarm'](a)
+    if model_type == "kde":
+        colors = mpl.colormaps['coolwarm'](a)
+    else:
+        colors = mpl.colormaps['viridis'](a)
 
     cont = ax.contourf(grid_xx, grid_yy, zz, levels=cntr_levels, colors=colors)
     fig.colorbar(cont, ax=ax, orientation='vertical', location='right')
@@ -288,6 +302,8 @@ def remove_outliers(p, norm=True):
     datapoints_dict = {}
     largest_cc_points_dict = {}
     all_cc_points_dict = {}
+    component_means_dict = {}
+    component_covs_dict = {}
     hull_points_dict = {}
 
     hull_areas = np.zeros(shape=(4, 12), dtype=float)
@@ -299,14 +315,17 @@ def remove_outliers(p, norm=True):
             datapoints = get_points(path=p, dataset=dset, target_cl=tb_cl, norm=norm)
             datapoints_dict[(dset, tb_cl)] = datapoints
             plot_points(path=p, dataset=dset, target_cl=tb_cl, points=datapoints)
-            largest_cc_idxs, all_cc_idxs = build_and_compute_mst(path=p, dataset=dset, target_cl=tb_cl,
-                                                                 points=datapoints)
+            largest_cc_idxs, all_cc_idxs, comp_means, comp_covs = (
+                build_and_compute_mst(path=p, dataset=dset, target_cl=tb_cl, points=datapoints))
 
             lcc_points = [datapoints[i] for i in range(len(datapoints)) if i in largest_cc_idxs]
             largest_cc_points_dict[(dset, tb_cl)] = np.array(lcc_points)
 
             acc_points = [datapoints[i] for i in range(len(datapoints)) if i in all_cc_idxs]
             all_cc_points_dict[(dset, tb_cl)] = np.array(acc_points)
+
+            component_means_dict[(dset, tb_cl)] = np.concatenate(comp_means, axis=0)
+            component_covs_dict[(dset, tb_cl)] = np.array(comp_covs)
 
             hull_area, hull_idxs = convex_hull(path=p, dataset=dset, target_cl=tb_cl, points=lcc_points)
             hull_points = [lcc_points[i] for i in range(len(lcc_points)) if i in hull_idxs]
@@ -324,17 +343,25 @@ def remove_outliers(p, norm=True):
     datapoints_fname = data_path + "datapoints.pkl" if not norm else data_path + "datapoints_norm.pkl"
     lcc_points_fname = data_path + "lcc_points.pkl" if not norm else data_path + "lcc_points_norm.pkl"
     acc_points_fname = data_path + "acc_points.pkl" if not norm else data_path + "acc_points_norm.pkl"
+    cc_means_fname = data_path + "cc_means.pkl" if not norm else data_path + "cc_means_norm.pkl"
+    cc_covs_fname = data_path + "cc_covs.pkl" if not norm else data_path + "cc_covs_norm.pkl"
     hullpoints_fname = data_path + "hullpoints.pkl" if not norm else data_path + "hullpoints_norm.pkl"
     datapoints_fp = open(datapoints_fname, "wb")
     lcc_points_fp = open(lcc_points_fname, "wb")
     acc_points_fp = open(acc_points_fname, "wb")
+    cc_means_fp = open(cc_means_fname, "wb")
+    cc_covs_fp = open(cc_covs_fname, "wb")
     hullpoints_fp = open(hullpoints_fname, "wb")
     pickle.dump(datapoints_dict, datapoints_fp)
     pickle.dump(largest_cc_points_dict, lcc_points_fp)
     pickle.dump(all_cc_points_dict, acc_points_fp)
+    pickle.dump(component_means_dict, cc_means_fp)
+    pickle.dump(component_covs_dict, cc_covs_fp)
     pickle.dump(hull_points_dict, hullpoints_fp)
     lcc_points_fp.close()
     acc_points_fp.close()
+    cc_means_fp.close()
+    cc_covs_fp.close()
     hullpoints_fp.close()
     datapoints_fp.close()
 
@@ -373,7 +400,40 @@ def remove_outliers(p, norm=True):
     print("mean_density:\n", mean_density_df)
 
 
-def compute_likelihood_dict(p, norm, outlier_removal):
+def compute_gmm_likelihood_dict(p, norm):
+    likelihood_dict, data_path = {}, p + "/data/"
+    all_points_fname = data_path + "datapoints.pkl" if not norm else data_path + "datapoints_norm.pkl"
+    all_points_fp = open(all_points_fname, "rb")
+    all_points_dict = pickle.load(all_points_fp)
+    core_points_fname = data_path + "acc_points.pkl" if not norm else data_path + "acc_points_norm.pkl"
+    core_points_fp = open(core_points_fname, "rb")
+    core_points_dict = pickle.load(core_points_fp)
+    cc_means_fname = data_path + "cc_means.pkl" if not norm else data_path + "cc_means_norm.pkl"
+    cc_means_fp = open(cc_means_fname, "rb")
+    cc_means_dict = pickle.load(cc_means_fp)
+    cc_covs_fname = data_path + "cc_covs.pkl" if not norm else data_path + "cc_covs_norm.pkl"
+    cc_covs_fp = open(cc_covs_fname, "rb")
+    cc_covs_dict = pickle.load(cc_covs_fp)
+
+    xx, yy, coords = compute_grid_points(all_points=all_points_dict)
+    ll_data_path = p + "ll/acc/"
+    for dset in DATASETS:
+        for tb_cl in TB_CLASSES:
+            likelihood_dict = get_likelihoods(model_type="gmm", dataset=dset, cl=tb_cl,
+                                              all_points=core_points_dict, ll_dict=likelihood_dict,
+                                              grid_xx=xx, grid_yy=yy, grid_points=coords, img_path=ll_data_path,
+                                              means=cc_means_dict, covs=cc_covs_dict)
+
+    if norm:
+        ll_fname = ll_data_path + "gmm_ll_norm.pkl"
+    else:
+        ll_fname = ll_data_path + "gmm_ll.pkl"
+    ll_fp = open(ll_fname, "wb")
+    pickle.dump(likelihood_dict, ll_fp)
+    ll_fp.close()
+
+
+def compute_kde_likelihood_dict(p, norm, outlier_removal):
     """Calculate the likelihood dict from the datapoints"""
     assert outlier_removal in ["none", "lcc", "acc"]
     likelihood_dict, data_path = {}, p + "/data/"
@@ -393,14 +453,14 @@ def compute_likelihood_dict(p, norm, outlier_removal):
     ll_data_path = p + "ll/raw/" if outlier_removal == "none" else p + f"ll/{outlier_removal}/"
     for dset in DATASETS:
         for tb_cl in TB_CLASSES:
-            likelihood_dict = get_all_kde(dataset=dset, cl=tb_cl,
-                                          all_points=core_points_dict, ll_dict=likelihood_dict,
-                                          grid_xx=xx, grid_yy=yy, grid_points=coords, img_path=ll_data_path)
+            likelihood_dict = get_likelihoods(model_type="kde", dataset=dset, cl=tb_cl,
+                                              all_points=core_points_dict, ll_dict=likelihood_dict,
+                                              grid_xx=xx, grid_yy=yy, grid_points=coords, img_path=ll_data_path)
 
     if norm:
-        ll_fname = ll_data_path + "ll_norm.pkl"
+        ll_fname = ll_data_path + "kde_ll_norm.pkl"
     else:
-        ll_fname = ll_data_path + "ll.pkl"
+        ll_fname = ll_data_path + "kde_ll.pkl"
     ll_fp = open(ll_fname, "wb")
     pickle.dump(likelihood_dict, ll_fp)
     ll_fp.close()
@@ -410,8 +470,9 @@ def main(p, norm=True, outlier_removal="none"):
     """Main method"""
 
     assert outlier_removal in ["none", "lcc", "acc"]
-    remove_outliers(p=p, norm=norm)
-    compute_likelihood_dict(p=p, norm=norm, outlier_removal=outlier_removal)
+    # remove_outliers(p=p, norm=norm)
+    # compute_kde_likelihood_dict(p=p, norm=norm, outlier_removal=outlier_removal)
+    compute_gmm_likelihood_dict(p=p, norm=norm)
 
 
 def tabulated(df):
