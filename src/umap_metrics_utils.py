@@ -94,7 +94,8 @@ def build_and_compute_mst(path, dataset, target_cl, points):
         node_dic[i] = (points[i][0], points[i][1])
         min_x, max_x = min(min_x, points[i][0]), max(max_x, points[i][0])
         min_y, max_y = min(min_y, points[i][1]), max(max_y, points[i][1])
-        
+
+    for i in range(len(points)):
         for j in range(i+1, len(points)):
             dist = math.sqrt((points[i][0] - points[j][0]) ** 2 + (points[i][1] - points[j][1]) ** 2)
             graph.add_edge(i, j, weight=dist)
@@ -183,30 +184,40 @@ def convex_hull(path, dataset, target_cl, points):
     return hull_area, hull.vertices
 
     
-def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points, img_path):
+def get_all_kde(model_type, dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points, img_path, **kwargs):
     """Get all kde"""
+    assert model_type in ['kde', 'gmm']
     train_points = all_points[(dataset, cl)]
     train_data = np.array(train_points)
-    from sklearn.neighbors import KernelDensity
-    from sklearn.model_selection import GridSearchCV
-    bandwidths = 10 ** np.linspace(-2, 1, 20)
-    grid = GridSearchCV(KernelDensity(kernel='gaussian'),
-                        {'bandwidth': bandwidths},
-                        cv=5,
-                        n_jobs=-1,
-                        verbose=1, refit=True)
-    grid.fit(train_data)
-    print(grid.best_params_)
-    kernel = grid.best_estimator_
-    kernel.fit(train_data)
+    if model_type == "kde":
+        from sklearn.neighbors import KernelDensity
+        from sklearn.model_selection import GridSearchCV
+        bandwidths = 10 ** np.linspace(-2, 1, 20)
+        grid = GridSearchCV(KernelDensity(kernel='gaussian'),
+                            {'bandwidth': bandwidths},
+                            cv=5,
+                            n_jobs=-1,
+                            verbose=1, refit=True)
+        grid.fit(train_data)
+        print(grid.best_params_)
+        model = grid.best_estimator_
+        model.fit(train_data)
+    else:
+        means, covs = kwargs["means"], kwargs["covs"]
+        precision_matrix = np.linalg.pinv(covs)
+        from sklearn.mixture import GaussianMixture
+        model = GaussianMixture(n_components=len(means), covariance_type='full', means_init=means,
+                                    precisions_init=precision_matrix)
+        model.fit(train_data)
+
     for eval_dset in DATASETS:
         for eval_cl in TB_CLASSES:
             eval_points = all_points[(eval_dset, eval_cl)]
             eval_data = np.array(eval_points)
-            eval_likelihood = kernel.score_samples(eval_data)
+            eval_likelihood = model.score_samples(eval_data)
             ll_dict[(dataset, cl, eval_dset, eval_cl)] = eval_likelihood
 
-    zz = kernel.score_samples(grid_points)
+    zz = model.score_samples(grid_points)
     # print(grid_points.shape, zz.shape)
     zz = zz.reshape(grid_xx.shape[0], -1)
     fig, ax = plt.subplots(figsize=(16, 9))
@@ -221,22 +232,22 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
     cont = ax.contourf(grid_xx, grid_yy, zz, levels=cntr_levels, colors=colors)
     fig.colorbar(cont, ax=ax, orientation='vertical', location='right')
     # plt.axis('scaled')
-    ax.set_title(f"KDE ({dataset}-{cl})")
+    ax.set_title(f"{model_type.upper()} ({dataset}-{cl})")
 
-    kde_out_path = img_path + f"images/kde/{dataset}/"
-    os.makedirs(kde_out_path, exist_ok=True)
-    plt.savefig(fname=kde_out_path + f"{cl}_kde.png", bbox_inches='tight')
+    contour_out_path = img_path + f"images/{model_type}/{dataset}/"
+    os.makedirs(contour_out_path, exist_ok=True)
+    plt.savefig(fname=contour_out_path + f"{cl}_{model_type}.png", bbox_inches='tight')
     ax.scatter(train_data[:, 0], train_data[:, 1], marker='o', c='white', alpha=0.2)
-    plt.savefig(fname=kde_out_path + f"{cl}_kde_with_points.png", bbox_inches='tight')
+    plt.savefig(fname=contour_out_path + f"{cl}_{model_type}_with_points.png", bbox_inches='tight')
     plt.close()
 
     for eval_cl in TB_CLASSES:
-        out_path = kde_out_path + cl + "/"
+        out_path = contour_out_path + cl + "/"
         fig, ax = plt.subplots(figsize=(16, 9))
         cont = ax.contourf(grid_xx, grid_yy, zz, levels=cntr_levels, colors=colors)  # , cmap='coolwarm')
         fig.colorbar(cont, ax=ax, orientation='vertical', location='right')
         # plt.axis('scaled')
-        ax.set_title(f"KDE ({dataset}-{eval_cl})")
+        ax.set_title(f"{model_type.upper()} ({dataset}-{eval_cl})")
 
         os.makedirs(out_path, exist_ok=True)
         eval_points = all_points[(dataset, eval_cl)]
@@ -244,25 +255,17 @@ def get_all_kde(dataset, cl, all_points, ll_dict, grid_xx, grid_yy, grid_points,
         ax.scatter(eval_data[:, 0], eval_data[:, 1], marker='o', c='black', alpha=0.2)
         plt.savefig(fname=out_path + f"{eval_cl}.png", bbox_inches='tight')
         plt.close()
-    # plt.imshow(zz, cmap='viridis_r')
-    # plt.colorbar()
-    # plt.show()
-    # print(dataset, cl, time.time() - st_time)
     return ll_dict
 
 
 def compute_grid_points(all_points):
-    # print("entering compute grid_points", type(all_points))
     xmin, ymin, xmax, ymax = np.inf, np.inf, -np.inf, -np.inf
-    for dset in DATASETS:
-        for cl in TB_CLASSES:
-            points = all_points[(dset, cl)]
-            # print(points.shape, points[:, 0].shape, points[:, 1].shape, "remove print")
-            xmin = min(xmin, points[:, 0].min())
-            xmax = max(xmax, points[:, 0].max())
-            ymin = min(ymin, points[:, 1].min())
-            ymax = max(ymax, points[:, 1].max())
-    # print(xmin, xmax, ymin, ymax)
+    for dset, cl in all_points.keys():
+        points = all_points[(dset, cl)]
+        xmin = min(xmin, points[:, 0].min())
+        xmax = max(xmax, points[:, 0].max())
+        ymin = min(ymin, points[:, 1].min())
+        ymax = max(ymax, points[:, 1].max())
 
     num_cells = 500
     x = np.linspace(xmin-1, xmax+1, num_cells+1)
@@ -270,8 +273,6 @@ def compute_grid_points(all_points):
     xx, yy = np.meshgrid(x, y)
     xx_r, yy_r = xx.reshape(-1, 1), yy.reshape(-1, 1)
     coords = np.hstack((xx_r, yy_r))
-    # print(xx.shape, yy.shape, coords.shape)
-    # print("leaving compute grid_points")
     return xx, yy, coords
 
 
@@ -780,6 +781,9 @@ def get_scatter_plots_acc(accs, tb_dict, in12_dict, title, use_size_scale=True):
     ax[0][0].set_ylabel("Toybox Avg Diff Pre")
     ax[0][0].set_xscale('log')
     ax[0][0].set_yscale('log')
+    xmin, xmax = ax[0][0].get_xlim()
+    ymin, ymax = ax[0][0].get_ylim()
+    ax[0][0].set_xlim(min(xmin, ymin), max(xmax, ymax))
 
     for model_name in in12_dict.keys():
         if model_name.endswith("_pre"):
@@ -789,6 +793,9 @@ def get_scatter_plots_acc(accs, tb_dict, in12_dict, title, use_size_scale=True):
     ax[0][1].set_ylabel("Toybox Max Diff Pre")
     ax[0][1].set_xscale('log')
     ax[0][1].set_yscale('log')
+    xmin, xmax = ax[0][1].get_xlim()
+    ymin, ymax = ax[0][1].get_ylim()
+    ax[0][1].set_xlim(min(xmin, ymin), max(xmax, ymax))
 
     for model_name in in12_dict.keys():
         if not model_name.endswith("_pre"):
@@ -798,6 +805,9 @@ def get_scatter_plots_acc(accs, tb_dict, in12_dict, title, use_size_scale=True):
     ax[1][0].set_ylabel("Toybox Avg Diff")
     ax[1][0].set_xscale('log')
     ax[1][0].set_yscale('log')
+    xmin, xmax = ax[1][0].get_xlim()
+    ymin, ymax = ax[1][0].get_ylim()
+    ax[1][0].set_xlim(min(xmin, ymin), max(xmax, ymax))
 
     for model_name in in12_dict.keys():
         if not model_name.endswith("_pre"):
@@ -807,6 +817,9 @@ def get_scatter_plots_acc(accs, tb_dict, in12_dict, title, use_size_scale=True):
     ax[1][1].set_ylabel("Toybox Max Diff")
     ax[1][1].set_xscale('log')
     ax[1][1].set_yscale('log')
+    xmin, xmax = ax[1][1].get_xlim()
+    ymin, ymax = ax[1][1].get_ylim()
+    ax[1][1].set_xlim(min(xmin, ymin), max(xmax, ymax))
 
     handles, labels = ax[1][1].get_legend_handles_labels()
 
