@@ -82,6 +82,17 @@ class CSVUtil:
         avg_loss = total_loss / n_total
         return round(avg_loss, 2)
 
+    def get_predictions(self, indices=None):
+        """Return predictions for given indices"""
+        pred_dict = {}
+        for row in self.reader_data:
+            index = int(row[INDEX_KEY])
+            prediction = int(row[PREDICTION_KEY])
+            if indices is None or index in indices:
+                pred_dict[index] = prediction
+
+        return pred_dict
+
 
 if __name__ == '__main__':
     csv_path = "../out/IN12_SUP/in12_supervised_pretrained_finetune_1/output/final_model/in12_test.csv"
