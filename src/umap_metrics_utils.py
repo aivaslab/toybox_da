@@ -9,7 +9,7 @@ import networkx as nx
 from scipy.spatial import ConvexHull
 import matplotlib as mpl
 from matplotlib.patches import ConnectionPatch
-from tabulate import tabulate
+from tabulate import tabulate, SEPARATING_LINE
 from collections import defaultdict
 from scipy.stats import pearsonr
 
@@ -578,34 +578,98 @@ def print_overlap_table(data_dict, key):
     print(tabulate(max_diff, headers=['Model'] + TB_CLASSES + ["Average"], tablefmt='psql', floatfmt='.2f'))
 
 
+def remove_negatives(accs, metrics):
+    accs_pos, metrics_pos = [], []
+    for i in range(len(metrics)):
+        if metrics[i] > 0:
+            metrics_pos.append(metrics[i])
+            accs_pos.append(accs[i])
+    return accs_pos, metrics_pos
+
+
+def make_positive(accs, metrics):
+    accs_pos, metrics_pos = [], []
+    min_val = min(metrics)
+    if min_val > 0:
+        perturbation = 0.0
+    else:
+        perturbation = abs(min_val) + 1e-6
+    for i in range(len(metrics)):
+        metrics_pos.append(metrics[i] + perturbation)
+        accs_pos.append(accs[i])
+    # print(len(accs_pos), len(metrics_pos))
+    return accs_pos, metrics_pos
+
+
+def threshold(accs, metrics):
+    thres = 1e-6
+    accs_pos, metrics_pos = [], []
+    for i in range(len(metrics)):
+        if metrics[i] <= 0:
+            metrics_pos.append(thres)
+        else:
+            metrics_pos.append(metrics[i])
+        accs_pos.append(accs[i])
+    # print(len(accs_pos), len(metrics_pos))
+    return accs_pos, metrics_pos
+
+
 def create_correlation_table(pre_accs, pre_avg, pre_max, post_accs, post_avg, post_max, key):
     corr_table = []
+
+    row = ['Avg Diff Pre']
     corr, p = pearsonr(pre_accs, pre_avg)
-    corr_table.append(['Avg Diff Pre', 'N', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+    row.append(f"{round(corr, 3)} (p {'=' if round(p, 3) >= 0.001 else '<'} "
+               f"{str(round(p, 3)) if round(p, 3) >= 0.001 else '0.001'})")
 
-    corr, p = pearsonr(post_accs, post_avg)
-    corr_table.append(['Avg Diff', 'N', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+    for f in [remove_negatives, make_positive, threshold]:
+        pre_accs_pos, pre_avg_pos = f(accs=pre_accs, metrics=pre_avg)
+        corr, p = pearsonr(pre_accs_pos, list(map(lambda x: math.log(x, 10), [i for i in pre_avg_pos])))
+        row.append(f"{round(corr, 3)} (p {'=' if round(p, 3) >= 0.001 else '<'} "
+                   f"{str(round(p, 3)) if round(p, 3) >= 0.001 else '0.001'})")
+    corr_table.append(row)
 
+    row = ['Max Diff Pre']
     corr, p = pearsonr(pre_accs, pre_max)
-    corr_table.append(['Max Diff Pre', 'N', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+    row.append(f"{round(corr, 3)} (p {'=' if round(p, 3) >= 0.001 else '<'} "
+               f"{str(round(p, 3)) if round(p, 3) >= 0.001 else '0.001'})")
 
+    for f in [remove_negatives, make_positive, threshold]:
+        pre_accs_pos, pre_max_pos = f(accs=pre_accs, metrics=pre_max)
+        corr, p = pearsonr(pre_accs_pos, list(map(lambda x: math.log(x, 10), [i for i in pre_max_pos])))
+        row.append(f"{round(corr, 3)} (p {'=' if round(p, 3) >= 0.001 else '<'} "
+                   f"{str(round(p, 3)) if round(p, 3) >= 0.001 else '0.001'})")
+    corr_table.append(row)
+    corr_table.append(SEPARATING_LINE)
+
+    row = ['Avg Diff']
+    corr, p = pearsonr(post_accs, post_avg)
+    row.append(f"{round(corr, 3)} (p {'=' if round(p, 3) >= 0.001 else '<'} "
+               f"{str(round(p, 3)) if round(p, 3) >= 0.001 else '0.001'})")
+
+    for f in [remove_negatives, make_positive, threshold]:
+        post_accs_pos, post_avg_pos = f(accs=post_accs, metrics=post_avg)
+        corr, p = pearsonr(post_accs_pos, list(map(lambda x: math.log(x, 10), [i for i in post_avg_pos])))
+        row.append(f"{round(corr, 3)} (p {'=' if round(p, 3) >= 0.001 else '<'} "
+                   f"{str(round(p, 3)) if round(p, 3) >= 0.001 else '0.001'})")
+    corr_table.append(row)
+
+    row = ['Max Diff']
     corr, p = pearsonr(post_accs, post_max)
-    corr_table.append(['Max Diff', 'N', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+    row.append(f"{round(corr, 3)} (p {'=' if round(p, 3) >= 0.001 else '<'} "
+               f"{str(round(p, 3)) if round(p, 3) >= 0.001 else '0.001'})")
 
-    corr, p = pearsonr(pre_accs, list(map(lambda x: math.log(x, 10), [0.01 if i <= 0 else i for i in pre_avg])))
-    corr_table.append(['Avg Diff Pre', 'Y', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
-
-    corr, p = pearsonr(post_accs, list(map(lambda x: math.log(x, 10), [0.01 if i <= 0 else i for i in post_avg])))
-    corr_table.append(['Avg Diff', 'Y', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
-
-    corr, p = pearsonr(pre_accs, list(map(lambda x: math.log(x, 10), [0.01 if i <= 0 else i for i in pre_max])))
-    corr_table.append(['Max Diff Pre', 'Y', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
-
-    corr, p = pearsonr(post_accs, list(map(lambda x: math.log(x, 10), [0.01 if i <= 0 else i for i in post_max])))
-    corr_table.append(['Max Diff', 'Y', round(corr, 3), round(p, 3) if round(p, 3) > 0.001 else "<0.001"])
+    for f in [remove_negatives, make_positive, threshold]:
+        post_accs_pos, post_max_pos = f(accs=post_accs, metrics=post_max)
+        corr, p = pearsonr(post_accs_pos, list(map(lambda x: math.log(x, 10), [i for i in post_max_pos])))
+        row.append(f"{round(corr, 3)} (p {'=' if round(p, 3) >= 0.001 else '<'} "
+                   f"{str(round(p, 3)) if round(p, 3) >= 0.001 else '0.001'})")
+    corr_table.append(row)
 
     print(key.center(40))
-    print(tabulate(corr_table, headers=['Metric', 'Log', 'r', 'p'], tablefmt='psql'))
+    print(tabulate(corr_table,
+                   headers=['Metric', 'Linear', 'Log (no -ve)', 'Log (translated)', 'Log (threshold)'],
+                   tablefmt='psql'))
 
 
 def calc_overlap_corr_by_model(accs, data_dict, key):
@@ -616,8 +680,8 @@ def calc_overlap_corr_by_model(accs, data_dict, key):
             avg_sum += data_arr[i][3]
             max_sum += data_arr[i][5]
 
-        avg_arr[model_name] = round(avg_sum / 12, 2)
-        max_arr[model_name] = round(max_sum / 12, 2)
+        avg_arr[model_name] = round(avg_sum / 12, 5)
+        max_arr[model_name] = round(max_sum / 12, 5)
 
     pre_accs, pre_avg, pre_max, post_accs, post_avg, post_max = [], [], [], [], [], []
     for model_name in data_dict.keys():
@@ -675,14 +739,14 @@ def get_scatter_plots_by_model(accs, data_dict, title, match_points=True):
         avg_avg[model_name] = round(avg_sum / 12, 2)
         max_avg[model_name] = round(max_sum / 12, 2)
 
-    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex='col', sharey=True)
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
 
     for model_name, acc in accs.items():
         if model_name.endswith("_pre"):
             ax[0][0].scatter(y=[acc], x=[avg_avg[model_name]], label=model_name[:-4], c=[COLORS[model_name]])
     ax[0][0].set_xlabel("Avg Diff Pre")
     ax[0][0].set_ylabel("Accuracy")
-    ax[0][0].set_xscale('log')
+    ax[0][0].set_xscale('symlog')
     ax[0][0].set_ylim(0, 105)
 
     for model_name, acc in accs.items():
@@ -690,21 +754,21 @@ def get_scatter_plots_by_model(accs, data_dict, title, match_points=True):
             ax[0][1].scatter(y=[acc], x=[max_avg[model_name]], label=model_name[:-4], c=[COLORS[model_name]])
     ax[0][1].set_xlabel("Max Diff Pre")
     ax[0][1].set_ylabel("Accuracy")
-    ax[0][1].set_xscale('log')
+    ax[0][1].set_xscale('symlog')
 
     for model_name, acc in accs.items():
         if not model_name.endswith("_pre"):
             ax[1][0].scatter(y=[acc], x=[avg_avg[model_name]], label=model_name, c=[COLORS[model_name]])
     ax[1][0].set_xlabel("Avg Diff")
     ax[1][0].set_ylabel("Accuracy")
-    ax[1][0].set_xscale('log')
+    ax[1][0].set_xscale('symlog')
 
     for model_name, acc in accs.items():
         if not model_name.endswith("_pre"):
             ax[1][1].scatter(y=[acc], x=[max_avg[model_name]], label=model_name, c=[COLORS[model_name]])
     ax[1][1].set_xlabel("Max Diff")
     ax[1][1].set_ylabel("Accuracy")
-    ax[1][1].set_xscale('log')
+    ax[1][1].set_xscale('symlog')
 
     handles, labels = ax[1][1].get_legend_handles_labels()
     fig.legend(handles, labels, loc='center right')
@@ -714,29 +778,53 @@ def get_scatter_plots_by_model(accs, data_dict, title, match_points=True):
             if not model_name.endswith("_pre"):
                 con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"], accs[model_name + "_pre"]),
                                       xyB=(avg_avg[model_name], accs[model_name]), coordsA="data", coordsB="data",
-                                      axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name], alpha=0.2)
+                                      axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name],
+                                      alpha=0.2)
 
                 fig.add_artist(con)
 
                 con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"], accs[model_name + "_pre"]),
                                       xyB=(max_avg[model_name], accs[model_name]), coordsA="data", coordsB="data",
-                                      axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name], alpha=0.2)
+                                      axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name],
+                                      alpha=0.2)
 
                 fig.add_artist(con)
 
     plt.suptitle(title)
-
     plt.show()
 
 
-def get_scatter_plots_by_model_by_class(accs, data_dict, title, match_points=True):
-    COLORS = {}
+def gen_scatter_plot_acc_metric(accuracies, metrics_dict, xlabel, ylabel, axis, pre, colors,
+                                rem_non_pos=False, translate=False, threshold_negatives=False, title=""):
+    for modelname, acc in accuracies.items():
+        if (pre and modelname.endswith("_pre")) or (not pre and not modelname.endswith("_pre")):
+            if rem_non_pos:
+                accs_pos, metrics = remove_negatives(acc, metrics_dict[modelname])
+                axis.scatter(y=accs_pos, x=metrics, label=modelname[:-4], c=[colors[modelname]])
+            elif translate:
+                accs_pos, metrics = make_positive(acc, metrics_dict[modelname])
+                axis.scatter(y=accs_pos, x=metrics, label=modelname[:-4], c=[colors[modelname]])
+            elif threshold_negatives:
+                accs_pos, metrics = threshold(acc, metrics_dict[modelname])
+                axis.scatter(y=accs_pos, x=metrics, label=modelname[:-4], c=[colors[modelname]])
+            else:
+                axis.scatter(y=acc, x=metrics_dict[modelname], label=modelname[:-4], c=[colors[modelname]])
+    axis.set_xlabel(xlabel)
+    axis.set_ylabel(ylabel)
+    axis.set_xscale('symlog')
+    axis.set_ylim(0, 105)
+    if title != "":
+        axis.set_title(title)
+
+
+def compare_scatter_plot_negative_val_removal(accs, data_dict, title):
+    colors = {}
     cmap_name = 'tab10'
     idx = 0
     for model_name in accs.keys():
         if not model_name.endswith("_pre"):
-            COLORS[model_name] = mpl.colormaps[cmap_name].colors[idx]
-            COLORS[model_name + "_pre"] = mpl.colormaps[cmap_name].colors[idx]
+            colors[model_name] = mpl.colormaps[cmap_name].colors[idx]
+            colors[model_name + "_pre"] = mpl.colormaps[cmap_name].colors[idx]
             idx += 1
 
     avg_avg = defaultdict(list)
@@ -745,39 +833,107 @@ def get_scatter_plots_by_model_by_class(accs, data_dict, title, match_points=Tru
     for model_name, data_arr in data_dict.items():
         for i, cl in enumerate(TB_CLASSES):
             avg_avg[model_name].append(data_arr[i][3])
-            max_avg[model_name].append(data_arr[i][5] if data_arr[i][5] > 0 else 1.0)
+            max_avg[model_name].append(data_arr[i][5])
 
-    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex='col', sharey=True)
-    for model_name, acc in accs.items():
-        if model_name.endswith("_pre"):
-            ax[0][0].scatter(y=acc, x=avg_avg[model_name], label=model_name[:-4], c=[COLORS[model_name]])
-    ax[0][0].set_xlabel("Avg Diff Pre")
-    ax[0][0].set_ylabel("Accuracy")
-    ax[0][0].set_xscale('log')
-    ax[0][0].set_ylim(0, 105)
+    fig, ax = plt.subplots(nrows=4, ncols=4, figsize=(24, 24), sharex=True, sharey=True)
 
-    for model_name, acc in accs.items():
-        if model_name.endswith("_pre"):
-            ax[0][1].scatter(y=acc, x=max_avg[model_name], label=model_name[:-4], c=[COLORS[model_name]])
-    ax[0][1].set_xlabel("Max Diff Pre")
-    ax[0][1].set_ylabel("Accuracy")
-    ax[0][1].set_xscale('log')
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff Pre", ylabel="Accuracy",
+                                axis=ax[0][0], rem_non_pos=False, translate=False, threshold_negatives=False,
+                                pre=True, colors=colors, title="Original")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff Pre", ylabel="Accuracy",
+                                axis=ax[0][1], rem_non_pos=True, translate=False, threshold_negatives=False,
+                                pre=True, colors=colors, title="Non-positives removed")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff Pre", ylabel="Accuracy",
+                                axis=ax[0][2], rem_non_pos=False, translate=True, threshold_negatives=False,
+                                pre=True, colors=colors, title="Translated")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff Pre", ylabel="Accuracy",
+                                axis=ax[0][3], rem_non_pos=False, translate=False, threshold_negatives=True,
+                                pre=True, colors=colors, title="Non-positives thresholded")
 
-    for model_name, acc in accs.items():
-        if not model_name.endswith("_pre"):
-            ax[1][0].scatter(y=acc, x=avg_avg[model_name], label=model_name, c=[COLORS[model_name]])
-    ax[1][0].set_xlabel("Avg Diff")
-    ax[1][0].set_ylabel("Accuracy")
-    ax[1][0].set_xscale('log')
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff Pre", ylabel="Accuracy",
+                                axis=ax[1][0], rem_non_pos=False, translate=False, threshold_negatives=False,
+                                pre=True, colors=colors, title="Original")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff Pre", ylabel="Accuracy",
+                                axis=ax[1][1], rem_non_pos=True, translate=False, threshold_negatives=False,
+                                pre=True, colors=colors, title="Non-positives removed")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff Pre", ylabel="Accuracy",
+                                axis=ax[1][2], rem_non_pos=False, translate=True, threshold_negatives=False,
+                                pre=True, colors=colors, title="Translated")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff Pre", ylabel="Accuracy",
+                                axis=ax[1][3], rem_non_pos=False, translate=False, threshold_negatives=True,
+                                pre=True, colors=colors, title="Non-positives thresholded")
 
-    for model_name, acc in accs.items():
-        if not model_name.endswith("_pre"):
-            ax[1][1].scatter(y=acc, x=max_avg[model_name], label=model_name, c=[COLORS[model_name]])
-    ax[1][1].set_xlabel("Max Diff")
-    ax[1][1].set_ylabel("Accuracy")
-    ax[1][1].set_xscale('log')
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff", ylabel="Accuracy",
+                                axis=ax[2][0], rem_non_pos=False, translate=False, threshold_negatives=False,
+                                pre=False, colors=colors, title="Original")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff", ylabel="Accuracy",
+                                axis=ax[2][1], rem_non_pos=True, translate=False, threshold_negatives=False,
+                                pre=False, colors=colors, title="Non-positives removed")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff", ylabel="Accuracy",
+                                axis=ax[2][2], rem_non_pos=False, translate=True, threshold_negatives=False,
+                                pre=False, colors=colors, title="Translated")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff", ylabel="Accuracy",
+                                axis=ax[2][3], rem_non_pos=False, translate=False, threshold_negatives=True,
+                                pre=False, colors=colors, title="Non-positives thresholded")
+
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff", ylabel="Accuracy",
+                                axis=ax[3][0], rem_non_pos=False, translate=False, threshold_negatives=False,
+                                pre=False, colors=colors, title="Original")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff", ylabel="Accuracy",
+                                axis=ax[3][1], rem_non_pos=True, translate=False, threshold_negatives=False,
+                                pre=False, colors=colors, title="Non-positives removed")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff", ylabel="Accuracy",
+                                axis=ax[3][2], rem_non_pos=False, translate=True, threshold_negatives=False,
+                                pre=False, colors=colors, title="Translated")
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff", ylabel="Accuracy",
+                                axis=ax[3][3], rem_non_pos=False, translate=False, threshold_negatives=True,
+                                pre=False, colors=colors, title="Non-positives thresholded")
 
     handles, labels = ax[1][1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='upper center', ncol=len(labels))
+
+    fig.suptitle(title, fontsize='x-large')
+    fig.tight_layout(pad=4.0, h_pad=1.5, )
+    plt.show()
+
+
+def get_scatter_plots_by_model_by_class(accs, data_dict, title, match_points=True, rem_non_positive=False,
+                                        translate_negative=False):
+    assert rem_non_positive is False or translate_negative is False, (f"Both rem_non_positive and translate_negative "
+                                                                      f"cannot be True")
+    colors = {}
+    cmap_name = 'tab10'
+    idx = 0
+    for model_name in accs.keys():
+        if not model_name.endswith("_pre"):
+            colors[model_name] = mpl.colormaps[cmap_name].colors[idx]
+            colors[model_name + "_pre"] = mpl.colormaps[cmap_name].colors[idx]
+            idx += 1
+
+    avg_avg = defaultdict(list)
+    max_avg = defaultdict(list)
+
+    for model_name, data_arr in data_dict.items():
+        for i, cl in enumerate(TB_CLASSES):
+            avg_avg[model_name].append(data_arr[i][3])
+            max_avg[model_name].append(data_arr[i][5])
+
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
+
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff Pre", ylabel="Accuracy",
+                                axis=ax[0][0], rem_non_pos=rem_non_positive, translate=translate_negative, pre=True,
+                                colors=colors)
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff Pre", ylabel="Accuracy",
+                                axis=ax[0][1], rem_non_pos=rem_non_positive, translate=translate_negative, pre=True,
+                                colors=colors)
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=avg_avg, xlabel="Avg Diff", ylabel="Accuracy",
+                                axis=ax[1][0], rem_non_pos=rem_non_positive, translate=translate_negative, pre=False,
+                                colors=colors)
+    gen_scatter_plot_acc_metric(accuracies=accs, metrics_dict=max_avg, xlabel="Max Diff", ylabel="Accuracy",
+                                axis=ax[1][1], rem_non_pos=rem_non_positive, translate=translate_negative, pre=False,
+                                colors=colors)
+
+    handles, labels = ax[0][0].get_legend_handles_labels()
     fig.legend(handles, labels, loc='center right')
 
     if match_points:
@@ -787,7 +943,7 @@ def get_scatter_plots_by_model_by_class(accs, data_dict, title, match_points=Tru
                     con = ConnectionPatch(xyA=(avg_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
                                           xyB=(avg_avg[model_name][i], accs[model_name][i]),
                                           coordsA="data", coordsB="data",
-                                          axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=COLORS[model_name],
+                                          axesA=ax[0][0], axesB=ax[1][0], arrowstyle='<->', color=colors[model_name],
                                           alpha=0.2)
 
                     fig.add_artist(con)
@@ -795,10 +951,12 @@ def get_scatter_plots_by_model_by_class(accs, data_dict, title, match_points=Tru
                     con = ConnectionPatch(xyA=(max_avg[model_name + "_pre"][i], accs[model_name + "_pre"][i]),
                                           xyB=(max_avg[model_name][i], accs[model_name][i]),
                                           coordsA="data", coordsB="data",
-                                          axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=COLORS[model_name],
+                                          axesA=ax[0][1], axesB=ax[1][1], arrowstyle='<->', color=colors[model_name],
                                           alpha=0.2)
                     fig.add_artist(con)
 
+    if rem_non_positive:
+        title += " (non-positives removed)"
     plt.suptitle(title)
 
     plt.show()
