@@ -13,6 +13,8 @@ from tabulate import tabulate
 from collections import defaultdict
 from scipy.stats import pearsonr
 
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
 import pickle
 
 import umap_preprocess_for_metrics
@@ -833,62 +835,63 @@ def get_scatter_plots_acc(accs, tb_dict, in12_dict, title, use_size_scale=True):
             tb_avg_avg[model_name].append(tb_dict[model_name][i][3])
             tb_max_avg[model_name].append(tb_dict[model_name][i][5] if data_arr[i][5] > 0.1 else 1.0)
 
-    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(17, 16), sharex='col', sharey='col')
-    for model_name in in12_dict.keys():
-        if model_name.endswith("_pre"):
-            ax[0][0].scatter(y=tb_avg_avg[model_name], x=in12_avg_avg[model_name], label=model_name[:-4],
-                             c=[COLORS[model_name]], alpha=alpha, s=list(map(size_func, accs[model_name])))
-    ax[0][0].set_xlabel("IN-12 Avg Diff Pre")
-    ax[0][0].set_ylabel("Toybox Avg Diff Pre")
-    ax[0][0].set_xscale('log')
-    ax[0][0].set_yscale('log')
-    xmin, xmax = ax[0][0].get_xlim()
-    ymin, ymax = ax[0][0].get_ylim()
-    ax[0][0].set_xlim(min(xmin, ymin), max(xmax, ymax))
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(18.6, 17.6), sharex='col', sharey='col')
 
-    for model_name in in12_dict.keys():
-        if model_name.endswith("_pre"):
-            ax[0][1].scatter(y=tb_max_avg[model_name], x=in12_max_avg[model_name], label=model_name[:-4],
-                             c=[COLORS[model_name]], alpha=alpha, s=list(map(size_func, accs[model_name])))
-    ax[0][1].set_xlabel("IN-12 Max Diff Pre")
-    ax[0][1].set_ylabel("Toybox Max Diff Pre")
-    ax[0][1].set_xscale('log')
-    ax[0][1].set_yscale('log')
-    xmin, xmax = ax[0][1].get_xlim()
-    ymin, ymax = ax[0][1].get_ylim()
-    ax[0][1].set_xlim(min(xmin, ymin), max(xmax, ymax))
+    def plot_scatter(axis, dict_1, dict_2, xlabel, ylabel, pre):
+        all_x, all_y = [], []
+        for mod_name in in12_dict.keys():
+            if pre:
+                if mod_name.endswith("_pre"):
+                    axis.scatter(y=dict_1[mod_name], x=dict_2[mod_name], label=mod_name[:-4],
+                                 c=[COLORS[mod_name]], alpha=alpha, s=list(map(size_func, accs[mod_name])))
+                    all_x += dict_2[mod_name]
+                    all_y += dict_1[mod_name]
+            else:
+                if not mod_name.endswith("_pre"):
+                    axis.scatter(y=dict_1[mod_name], x=dict_2[mod_name], label=mod_name,
+                                 c=[COLORS[mod_name]], alpha=alpha, s=list(map(size_func, accs[mod_name])))
+                    all_x += dict_2[mod_name]
+                    all_y += dict_1[mod_name]
+        axis.set_xlabel(xlabel)
+        axis.set_ylabel(ylabel)
+        axis.set_xscale('log')
+        axis.set_yscale('log')
+        xmin, xmax = axis.get_xlim()
+        ymin, ymax = axis.get_ylim()
+        axis.set_xlim(min(xmin, ymin), max(xmax, ymax))
 
-    for model_name in in12_dict.keys():
-        if not model_name.endswith("_pre"):
-            ax[1][0].scatter(y=tb_avg_avg[model_name], x=in12_avg_avg[model_name], label=model_name,
-                             c=[COLORS[model_name]], alpha=alpha, s=list(map(size_func, accs[model_name])))
-    ax[1][0].set_xlabel("IN-12 Avg Diff")
-    ax[1][0].set_ylabel("Toybox Avg Diff")
-    ax[1][0].set_xscale('log')
-    ax[1][0].set_yscale('log')
-    xmin, xmax = ax[1][0].get_xlim()
-    ymin, ymax = ax[1][0].get_ylim()
-    ax[1][0].set_xlim(min(xmin, ymin), max(xmax, ymax))
+        # create new Axes on the right and on the top of the current Axes
+        divider = make_axes_locatable(axis)
+        # below height and pad are in inches
+        ax00_histx = divider.append_axes("top", 0.75, pad=0.05, sharex=axis)
+        ax00_histy = divider.append_axes("right", 0.75, pad=0.05, sharey=axis)
 
-    for model_name in in12_dict.keys():
-        if not model_name.endswith("_pre"):
-            ax[1][1].scatter(y=tb_max_avg[model_name], x=in12_max_avg[model_name], label=model_name,
-                             c=[COLORS[model_name]], alpha=alpha, s=list(map(size_func, accs[model_name])))
-    ax[1][1].set_xlabel("IN-12 Max Diff")
-    ax[1][1].set_ylabel("Toybox Max Diff")
-    ax[1][1].set_xscale('log')
-    ax[1][1].set_yscale('log')
-    xmin, xmax = ax[1][1].get_xlim()
-    ymin, ymax = ax[1][1].get_ylim()
-    ax[1][1].set_xlim(min(xmin, ymin), max(xmax, ymax))
+        # make some labels invisible
+        ax00_histx.xaxis.set_tick_params(labelbottom=False)
+        ax00_histy.yaxis.set_tick_params(labelleft=False)
+
+        # create histogram with custom limits
+        xymin, xymax = min(xmin, ymin), max(xmax, ymax)
+        bins = np.logspace(np.log10(xymin), np.log10(xymax), 30, endpoint=True)
+        ax00_histx.hist(all_x, bins=bins, alpha=0.6)
+        ax00_histy.hist(all_y, bins=bins, orientation='horizontal', alpha=0.6)
+
+    plot_scatter(axis=ax[0][0], dict_1=tb_avg_avg, dict_2=in12_avg_avg,
+                 xlabel="IN-12 Avg Diff Pre", ylabel="Toybox Avg Diff Pre", pre=True)
+    plot_scatter(axis=ax[0][1], dict_1=tb_max_avg, dict_2=in12_max_avg,
+                 xlabel="IN-12 Avg Diff Pre", ylabel="Toybox Avg Diff Pre", pre=True)
+    plot_scatter(axis=ax[1][0], dict_1=tb_avg_avg, dict_2=in12_avg_avg,
+                 xlabel="IN-12 Avg Diff Pre", ylabel="Toybox Avg Diff Pre", pre=False)
+    plot_scatter(axis=ax[1][1], dict_1=tb_max_avg, dict_2=in12_max_avg,
+                 xlabel="IN-12 Avg Diff Pre", ylabel="Toybox Avg Diff Pre", pre=False)
 
     handles, labels = ax[1][1].get_legend_handles_labels()
 
     legend = fig.legend(handles, labels, loc='center right', markerscale=0.5)
     for handle in legend.legendHandles:
         handle._sizes = [150]
-
     plt.suptitle(title)
+    # fig.tight_layout()
 
     plt.show()
 
