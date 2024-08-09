@@ -807,8 +807,8 @@ class ToyboxDatasetClass(torchdata.Dataset):
                 row_video = self.train_csvFile[idx_row]['Transformation']
                 assert row_video in self.views
                 self.indicesSelected.append(idx_row)
-    
-                    
+
+
 class ToyboxDatasetSSL(torchdata.Dataset):
     """Class definition for Toybox dataset for SSL experiments"""
     KEYS = {
@@ -821,7 +821,7 @@ class ToyboxDatasetSSL(torchdata.Dataset):
         'cl_end': 'CL End',
         'cl_id': 'Class ID',
     }
-    
+
     def __init__(self, rng, transform=None, hypertune=True, distort='transform', fraction=1.0,
                  distortArg=False, adj=-1):
         self.rng = rng
@@ -838,7 +838,7 @@ class ToyboxDatasetSSL(torchdata.Dataset):
         self.tr_key = 'Transformation'
         self.cl_start_key = 'CL Start'
         self.cl_end_key = 'CL End'
-        
+
         if not hypertune:
             self.trainImagesFile = "../data/data_12/Toybox/toybox_data_interpolated_cropped_train.pickle"
             self.trainLabelsFile = "../data/data_12/Toybox/toybox_data_interpolated_cropped_train.csv"
@@ -861,7 +861,7 @@ class ToyboxDatasetSSL(torchdata.Dataset):
         actualIndex = self.indicesSelected[index]
         img = np.array(cv2.imdecode(self.train_data[actualIndex], 3))
         label = self.train_csvFile[actualIndex]['Class ID']
-    
+
         if self.distort == 'self':
             img2 = img
         elif self.distort == 'object':
@@ -869,7 +869,7 @@ class ToyboxDatasetSSL(torchdata.Dataset):
                         int(self.train_csvFile[actualIndex][self.obj_end_key])
             id2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
             img2 = np.array(cv2.imdecode(self.train_data[id2], 3))
-            
+
         elif self.distort == 'class':
             low, high = int(self.train_csvFile[actualIndex][self.cl_start_key]), \
                         int(self.train_csvFile[actualIndex][self.cl_end_key])
@@ -898,15 +898,118 @@ class ToyboxDatasetSSL(torchdata.Dataset):
                     print(low, actualIndex, high)
                     raise RuntimeError("Error in calculating index.")
             img2 = np.array(cv2.imdecode(self.train_data[id2], 3))
+
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)
         if self.transform is not None:
             imgs = [self.transform(img), self.transform(img2)]
         else:
             imgs = [img, img2]
-                
+
         return (index, actualIndex), imgs
-    
+
     def __str__(self):
         return "Toybox SSL"
+
+
+class ToyboxDatasetSSLPaired(ToyboxDatasetSSL):
+    """Class definition for Toybox dataset for SSL experiments with paired samples"""
+    def __len__(self):
+        return len(self.indicesSelected)
+
+    def __getitem__(self, index):
+        actual_idx1 = self.indicesSelected[index]
+        img1 = np.array(cv2.imdecode(self.train_data[actual_idx1], 3))
+        cl_low, cl_high = int(self.train_csvFile[actual_idx1][self.cl_start_key]), \
+            int(self.train_csvFile[actual_idx1][self.cl_end_key])
+        actual_idx3 = self.rng.integers(low=cl_low, high=cl_high, size=1)[0]
+        img3 = np.array(cv2.imdecode(self.train_data[actual_idx3], 3))
+        label = self.train_csvFile[actual_idx1]['Class ID']
+
+        if self.distort == 'self':
+            actual_idx2 = actual_idx1
+            img2 = np.array(cv2.imdecode(self.train_data[actual_idx2], 3))
+            actual_idx4 = actual_idx3
+            img4 = np.array(cv2.imdecode(self.train_data[actual_idx4], 3))
+        elif self.distort == 'object':
+            low, high = int(self.train_csvFile[actual_idx1][self.obj_start_key]), \
+                int(self.train_csvFile[actual_idx1][self.obj_end_key])
+            actual_idx2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+            img2 = np.array(cv2.imdecode(self.train_data[actual_idx2], 3))
+
+            low, high = int(self.train_csvFile[actual_idx3][self.obj_start_key]), \
+                int(self.train_csvFile[actual_idx3][self.obj_end_key])
+            actual_idx4 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+            img4 = np.array(cv2.imdecode(self.train_data[actual_idx4], 3))
+
+        elif self.distort == 'class':
+            low, high = int(self.train_csvFile[actual_idx1][self.cl_start_key]), \
+                int(self.train_csvFile[actual_idx1][self.cl_end_key])
+            actual_idx2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+            img2 = np.array(cv2.imdecode(self.train_data[actual_idx2], 3))
+
+            low, high = int(self.train_csvFile[actual_idx3][self.cl_start_key]), \
+                int(self.train_csvFile[actual_idx3][self.cl_end_key])
+            actual_idx4 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+            img4 = np.array(cv2.imdecode(self.train_data[actual_idx4], 3))
+
+        else:
+            if self.adj == -1:
+                low, high = int(self.train_csvFile[actual_idx1][self.tr_start_key]), int(
+                    self.train_csvFile[actual_idx1][self.tr_end_key])
+                actual_idx2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+
+                low, high = int(self.train_csvFile[actual_idx3][self.tr_start_key]), int(
+                    self.train_csvFile[actual_idx3][self.tr_end_key])
+                actual_idx4 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+            else:
+                low = max(0, actual_idx1 - self.adj)
+                high = min(int(len(self.train_data)) - 1, actual_idx1 + self.adj)
+                try:
+                    if self.train_csvFile[low][self.tr_key] != self.train_csvFile[actual_idx1][self.tr_key]:
+                        actual_idx2 = high
+                    elif self.train_csvFile[high][self.tr_key] != self.train_csvFile[actual_idx1][self.tr_key]:
+                        actual_idx2 = low
+                    else:
+                        if self.distortArg:
+                            actual_idx2 = self.rng.choice([low, high], 1)[0]
+                        else:
+                            actual_idx2 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+                except IndexError:
+                    print(low, actual_idx1, high)
+                    raise RuntimeError("Error in calculating index.")
+
+                low = max(0, actual_idx3 - self.adj)
+                high = min(int(len(self.train_data)) - 1, actual_idx3 + self.adj)
+                try:
+                    if self.train_csvFile[low][self.tr_key] != self.train_csvFile[actual_idx3][self.tr_key]:
+                        actual_idx4 = high
+                    elif self.train_csvFile[high][self.tr_key] != self.train_csvFile[actual_idx3][self.tr_key]:
+                        actual_idx4 = low
+                    else:
+                        if self.distortArg:
+                            actual_idx4 = self.rng.choice([low, high], 1)[0]
+                        else:
+                            actual_idx4 = self.rng.integers(low=low, high=high + 1, size=1)[0]
+                except IndexError:
+                    print(low, actual_idx3, high)
+                    raise RuntimeError("Error in calculating index.")
+            img2 = np.array(cv2.imdecode(self.train_data[actual_idx2], 3))
+            img4 = np.array(cv2.imdecode(self.train_data[actual_idx4], 3))
+
+        img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
+        img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)
+        img3 = cv2.cvtColor(img3, cv2.COLOR_BGR2RGB)
+        img4 = cv2.cvtColor(img4, cv2.COLOR_BGR2RGB)
+        if self.transform is not None:
+            images = [self.transform(img1), self.transform(img2), self.transform(img3), self.transform(img4)]
+        else:
+            images = [img1, img2, img3, img4]
+
+        return (index, actual_idx1, actual_idx2, actual_idx3, actual_idx4), images, label
+
+    def __str__(self):
+        return "Toybox SSL Paired"
 
 
 class DatasetOffice31(torchdata.Dataset):
