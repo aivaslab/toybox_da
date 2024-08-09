@@ -139,6 +139,33 @@ def sup_con_loss(features, labels, temp):
     positives_loss_sum = torch.sum(positive_loss_ratio, dim=1)
     positives_loss_ave = torch.nan_to_num(torch.divide(positives_loss_sum, positive_count), nan=0)
     return -torch.mean(positives_loss_ave)
+
+
+class OrientationLossV1(nn.Module):
+    def __init__(self, num_images_in_batch, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_images_in_batch = num_images_in_batch
+        self.mask = self.get_mask()
+
+    def get_mask(self):
+        bsize = self.num_images_in_batch // 4
+        base_mask = -1 * torch.eye(bsize) + 1 - torch.eye(bsize)
+        mask_rep_y = torch.repeat_interleave(base_mask, 4, dim=1)
+        mask_rep_x = torch.repeat_interleave(mask_rep_y, 4, dim=0)
+
+        return mask_rep_x.unsqueeze(0).cuda()
+
+    def forward(self, src_feats, trgt_feats):
+        # print(src_feats.shape, trgt_feats.shape)
+        dist_matrix = trgt_feats.unsqueeze(1) - src_feats.unsqueeze(0)
+        # print(dist_matrix.shape)
+        vec_sim = torch.mul(dist_matrix.unsqueeze(1), dist_matrix.unsqueeze(2)).sum(dim=-1)
+        # print(vec_sim.shape)
+        mask = self.mask
+        # print(mask.shape)
+        loss = torch.mul(vec_sim, mask).sum()
+        # print(loss.shape, loss)
+        return loss / (src_feats.size(0) * src_feats.size(0) * trgt_feats.size(0))
         
         
 class SupConLoss(nn.Module):
@@ -248,6 +275,7 @@ def mixup(input: torch.Tensor,
     indices = torch.randperm(input.size(0), device=input.device, dtype=torch.long)
     return partial_mixup(input, gamma, indices), partial_mixup(target, gamma, indices)
 
+
 def calc_accuracy(output, target, topk=(1,)):
     """
     Computes the accuracy over the k top predictions for the specified values of k
@@ -310,6 +338,8 @@ def online_mean_and_sd(loader):
     
     for _, data, _ in loader:
         # print(data.shape)
+        if isinstance(data, list):
+            data = torch.concatenate(data)
         b, c, h, w = data.shape
         nb_pixels = b * h * w
         sum_ = torch.sum(data, dim=[0, 2, 3])
