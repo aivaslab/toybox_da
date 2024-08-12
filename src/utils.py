@@ -4,7 +4,7 @@ Module for project utils
 import torch
 import argparse
 import logging
-import torch.nn.functional as F
+import torch.nn.functional as func
 import torch.nn as nn
 from typing import Tuple
 from PIL import Image
@@ -66,11 +66,11 @@ def decoupled_contrastive_loss(features, temp):
     """Implement the decoupled contrastive loss
     https://arxiv.org/pdf/2110.06848"""
     dev = torch.device('cuda:0')
-    batchSize = features.shape[0] / 2
-    labels = torch.cat([torch.arange(batchSize) for _ in range(2)], dim=0)
+    batch_size = features.shape[0] / 2
+    labels = torch.cat([torch.arange(batch_size) for _ in range(2)], dim=0)
     labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
     labels = labels.to(dev)
-    features = F.normalize(features, dim=1)
+    features = func.normalize(features, dim=1)
     similarity_matrix = torch.matmul(features, torch.transpose(features, 0, 1))
 
     # discard the main diagonal from both: labels and similarities matrix
@@ -94,11 +94,11 @@ def decoupled_contrastive_loss(features, temp):
 def info_nce_loss(features, temp):
     """Implement the info_nce loss"""
     dev = torch.device('cuda:0')
-    batchSize = features.shape[0] / 2
-    labels = torch.cat([torch.arange(batchSize) for _ in range(2)], dim=0)
+    batch_size = features.shape[0] / 2
+    labels = torch.cat([torch.arange(batch_size) for _ in range(2)], dim=0)
     labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
     labels = labels.to(dev)
-    features = F.normalize(features, dim=1)
+    features = func.normalize(features, dim=1)
     similarity_matrix = torch.matmul(features, torch.transpose(features, 0, 1))
 
     # discard the main diagonal from both: labels and similarities matrix
@@ -119,7 +119,7 @@ def sup_con_loss(features, labels, temp):
     device = torch.device('cuda:0')
     same_cl_matrix = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
     same_cl_matrix = same_cl_matrix.to(device)
-    features = F.normalize(features, dim=1)
+    features = func.normalize(features, dim=1)
     similarity_matrix = torch.matmul(features, torch.transpose(features, 0, 1)).to(device)
     # print(similarity_matrix)
     mask = torch.eye(labels.shape[0], dtype=torch.bool).to(device)
@@ -159,8 +159,8 @@ class OrientationLossV1(nn.Module):
         # print(src_feats.shape, trgt_feats.shape)
         dist_matrix = trgt_feats.unsqueeze(1) - src_feats.unsqueeze(0)
         # print(dist_matrix.shape)
-        vec_sim = torch.mul(dist_matrix.unsqueeze(1), dist_matrix.unsqueeze(2)).sum(dim=-1)
-        # print(vec_sim.shape)
+        # vec_sim = torch.mul(dist_matrix.unsqueeze(1), dist_matrix.unsqueeze(2)).sum(dim=-1)
+        vec_sim = func.cosine_similarity(dist_matrix.unsqueeze(1), dist_matrix.unsqueeze(2), dim=-1)
         mask = self.mask
         # print(mask.shape)
         loss = torch.mul(vec_sim, mask).sum()
