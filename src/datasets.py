@@ -924,7 +924,7 @@ class ToyboxDatasetSSLPaired(ToyboxDatasetSSL):
             int(self.train_csvFile[actual_idx1][self.cl_end_key])
         actual_idx3 = self.rng.integers(low=cl_low, high=cl_high, size=1)[0]
         img3 = np.array(cv2.imdecode(self.train_data[actual_idx3], 3))
-        label = self.train_csvFile[actual_idx1]['Class ID']
+        label = int(self.train_csvFile[actual_idx1]['Class ID'])
 
         if self.distort == 'self':
             actual_idx2 = actual_idx1
