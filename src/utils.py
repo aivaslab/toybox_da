@@ -8,6 +8,7 @@ import torch.nn.functional as func
 import torch.nn as nn
 from typing import Tuple
 from PIL import Image
+import numpy as np
 
 
 COLOR = {
@@ -91,6 +92,41 @@ def decoupled_contrastive_loss(features, temp):
     return total_loss
 
 
+def sup_decoupled_contrastive_loss(features, temp, labels):
+    """Implement the decoupled contrastive loss
+    https://arxiv.org/pdf/2110.06848"""
+    dev = torch.device('cuda:0')
+    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    labels = labels.to(dev)
+    features = func.normalize(features, dim=1)
+
+    similarity_matrix = torch.matmul(features, torch.transpose(features, 0, 1))
+
+    # print("labels before masking\n", labels)
+    # print("sim b4 mask\n", similarity_matrix)
+    # discard the main diagonal from both: labels and similarities matrix
+    mask = torch.eye(labels.shape[0], dtype=torch.bool).to(dev)
+    labels = labels[~mask].view(labels.shape[0], -1).type(torch.uint8)
+    # print("labels after masking\n", labels)
+    similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+    # print("sim aftr mask\n", similarity_matrix)
+
+    positives = torch.where(labels > 0, similarity_matrix, -np.inf)
+    negatives = torch.where(labels < 1e-6, similarity_matrix, -np.inf)
+
+    # print(positives)
+    # print(negatives)
+
+    positives = positives / temp
+    negatives = negatives / temp
+
+    pos_loss = -torch.logsumexp(positives, dim=1, keepdim=True)
+    neg_loss = torch.logsumexp(negatives, dim=1, keepdim=True)
+    total_loss = (pos_loss + neg_loss).mean()
+
+    return total_loss
+
+
 def info_nce_loss(features, temp):
     """Implement the info_nce loss"""
     dev = torch.device('cuda:0')
@@ -162,6 +198,37 @@ class OrientationLossV1(nn.Module):
         # vec_sim = torch.mul(dist_matrix.unsqueeze(1), dist_matrix.unsqueeze(2)).sum(dim=-1)
         vec_sim = func.cosine_similarity(dist_matrix.unsqueeze(1), dist_matrix.unsqueeze(2), dim=-1)
         mask = self.mask
+        # print(mask.shape)
+        loss = torch.mul(vec_sim, mask).sum()
+        # print(loss.shape, loss)
+        return loss / (src_feats.size(0) * src_feats.size(0) * trgt_feats.size(0))
+
+
+class OrientationLossV2(nn.Module):
+    def __init__(self, use_cosine, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_cosine = use_cosine
+
+    @staticmethod
+    def get_mask(labels):
+        cl_mask = (labels.unsqueeze(0) == labels.unsqueeze(1)).int()
+        base_mask = -1 * cl_mask + 1 - cl_mask
+        mask_rep_y = torch.repeat_interleave(base_mask, 4, dim=1)
+        mask_rep_x = torch.repeat_interleave(mask_rep_y, 4, dim=0)
+
+        return mask_rep_x.unsqueeze(0).cuda()
+
+    def forward(self, src_feats, trgt_feats, src_labels):
+        # print(src_feats.shape, trgt_feats.shape)
+        dist_matrix = trgt_feats.unsqueeze(1) - src_feats.unsqueeze(0)
+        # print(dist_matrix.shape)
+        if self.use_cosine:
+            vec_sim = func.cosine_similarity(dist_matrix.unsqueeze(1), dist_matrix.unsqueeze(2), dim=-1)
+            # print(vec_sim.shape)
+        else:
+            vec_sim = torch.mul(dist_matrix.unsqueeze(1), dist_matrix.unsqueeze(2)).sum(dim=-1)
+            # print(vec_sim.shape)
+        mask = self.get_mask(labels=src_labels)
         # print(mask.shape)
         loss = torch.mul(vec_sim, mask).sum()
         # print(loss.shape, loss)
@@ -376,7 +443,7 @@ def concat_images_vertically(images, gap=5):
     return dst
 
 
-def get_images(images, mean, std, aug=True):
+def get_images(images, mean, std, aug=True, cols=8):
     """
     Return images from the tensor provided.
     Inverse Normalize the images if aug is True
@@ -423,9 +490,9 @@ def get_images(images, mean, std, aug=True):
         return _im
     
     hor_images = []
-    for i in range(len(ims1) // 8):
-        if len(ims1[i * 8:min(i * 8 + 8, len(ims1))]) == 8:
-            hor_images.append(get_concat_h_multi_blank(ims1[i * 8:min(i * 8 + 8, len(ims1))]))
+    for i in range(len(ims1) // cols):
+        if len(ims1[i * cols:min(i * cols + cols, len(ims1))]) == cols:
+            hor_images.append(get_concat_h_multi_blank(ims1[i * cols:min(i * cols + cols, len(ims1))]))
     
     return get_concat_v_multi_blank(hor_images)
 
