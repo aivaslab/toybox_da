@@ -2,6 +2,25 @@ import torch
 import torch.nn as nn
 from typing import Sequence, Optional
 
+import ot
+
+
+class EMD1DLoss(nn.Module):
+    def __init__(self):
+        super(EMD1DLoss, self).__init__()
+
+    @staticmethod
+    def forward(z_s: torch.Tensor, z_t: torch.Tensor) -> torch.Tensor:
+        dist_matrix = torch.dist(z_s.unsqueeze(1), z_t.unsqueeze(0), 2)
+        # print(dist_matrix.shape, dist_matrix.requires_grad)
+        ot_map = ot.emd_1d(z_s, z_t, metric='euclidean')
+        # print(ot_map.shape, ot_map.requires_grad)
+
+        loss = torch.sum(dist_matrix * ot_map)
+        # print(loss, loss.requires_grad)
+
+        return loss
+
 
 class JointMultipleKernelMaximumMeanDiscrepancy(nn.Module):
 

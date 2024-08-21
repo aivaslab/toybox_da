@@ -171,7 +171,7 @@ class DualSSLClassMMDModelV1:
     """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
 
     def __init__(self, network, src_loader, trgt_loader, logger, no_save, tb_ssl_loss, in12_ssl_loss,
-                 tb_alpha, in12_alpha, mmd_alpha, ignore_mmd_loss, asymmetric):
+                 tb_alpha, in12_alpha, mmd_alpha, ignore_mmd_loss, asymmetric, use_ot):
         self.network = network
         self.src_loader = utils.ForeverDataLoader(src_loader)
         self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
@@ -186,15 +186,20 @@ class DualSSLClassMMDModelV1:
         self.mmd_alpha = mmd_alpha
         self.ignore_mmd_loss = ignore_mmd_loss
         self.asymmetric = asymmetric
+        self.use_ot = use_ot
 
-        self.jmmd_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
-            kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
-                     ),
-            linear=False,
-        ).cuda()
+        if self.use_ot:
+            self.dist_loss = mmd_util.EMD1DLoss()
+        else:
+            self.dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+                kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+                         ),
+                linear=False,
+            ).cuda()
 
         num_params_trainable, num_params = self.network.count_trainable_parameters()
         self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
+        # torch.autograd.set_detect_anomaly(True)
 
     def get_mmd_alpha(self, step, steps, ep, ep_total):
         total_steps = steps * ep_total
@@ -204,6 +209,7 @@ class DualSSLClassMMDModelV1:
 
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
+
         self.network.set_train()
         num_batches = 0
         src_loss_total = 0.0
@@ -266,8 +272,10 @@ class DualSSLClassMMDModelV1:
                     torch.matmul(src_feats_stacked, src_feats_stacked.transpose(0, 1)), (-1, 1))
             trgt_feats_dists = torch.reshape(torch.matmul(trgt_feats_1, trgt_feats_1.transpose(0, 1)), (-1, 1))
             # print(src_feats_dists.size(), trgt_feats_dists.size())
-
-            mmd_dist_loss = self.jmmd_loss((src_feats_dists, ), (trgt_feats_dists, ))
+            if self.use_ot:
+                mmd_dist_loss = self.dist_loss(src_feats_dists, trgt_feats_dists)
+            else:
+                mmd_dist_loss = self.dist_loss((src_feats_dists, ), (trgt_feats_dists, ))
             mmd_alpha = self.get_mmd_alpha(steps=steps, step=step, ep=ep, ep_total=ep_total)
             if self.ignore_mmd_loss:
                 loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss

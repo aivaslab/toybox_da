@@ -73,5 +73,7 @@ def get_dual_ssl_class_mmd_v1_parser():
                                                                                       "training")
     parser.add_argument("--asymmetric", action='store_true', default=False, help="Use this flag to select asymmetric "
                                                                                  "mmd loss during training")
+    parser.add_argument("--use-ot", default=False, action='store_true', help="Use this flag to use OT-based loss "
+                                                                             "instead of MMD")
 
     return parser
