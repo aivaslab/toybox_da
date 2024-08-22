@@ -1,4 +1,4 @@
-"""Module implementing the source pretraining algorithm"""
+"""Module implementing the linear evaluation of a trained network"""
 import argparse
 import numpy as np
 import os
