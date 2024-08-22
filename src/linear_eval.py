@@ -11,7 +11,7 @@ import torchvision.transforms as transforms
 import torch.utils.tensorboard as tb
 
 import datasets
-import models
+import models_eval
 import networks
 import utils
 
@@ -218,7 +218,8 @@ def main():
     for params in net.backbone.parameters():
         params.requires_grad = False
         
-    pre_model = models.ModelLE(network=net, train_loader=src_loader_train, test_loader=src_loader_test, logger=logger)
+    pre_model = models_eval.ModelLE(network=net, train_loader=src_loader_train, test_loader=src_loader_test,
+                                    logger=logger)
     
     optimizer = torch.optim.Adam(net.classifier_head.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'])
     
