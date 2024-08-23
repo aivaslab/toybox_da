@@ -64,12 +64,13 @@ def run_training(exp_args):
     tb_alpha = exp_args['tb_alpha']
     in12_alpha = exp_args['in12_alpha']
     save_freq = exp_args['save_freq']
-    mmd_alpha = exp_args['mmd_alpha']
-    ignore_mmd_loss = exp_args['ignore_mmd_loss']
+    div_alpha = exp_args['div_alpha']
+    ignore_div_loss = exp_args['ignore_div_loss']
     tb_ssl_loss = exp_args['tb_ssl_loss']
     in12_ssl_loss = exp_args['in12_ssl_loss']
     asymmetric = exp_args['asymmetric']
     use_ot = exp_args['use_ot']
+    div_metric = exp_args['div_metric']
 
     tb_transform_train = tb_in12_transforms.get_ssl_transform(dset="toybox")
     tb_loader_train = get_dataloader(dset="toybox", batch_size=b_size, ssl_type=tb_ssl_type,
@@ -104,8 +105,8 @@ def run_training(exp_args):
                                                        logger=logger, no_save=no_save,
                                                        tb_ssl_loss=tb_ssl_loss, in12_ssl_loss=in12_ssl_loss,
                                                        tb_alpha=tb_alpha, in12_alpha=in12_alpha,
-                                                       mmd_alpha=mmd_alpha, ignore_mmd_loss=ignore_mmd_loss,
-                                                       asymmetric=asymmetric, use_ot=use_ot)
+                                                       div_alpha=div_alpha, ignore_div_loss=ignore_div_loss,
+                                                       asymmetric=asymmetric, use_ot=use_ot, div_metric=div_metric)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
                                 momentum=0.9, nesterov=True)

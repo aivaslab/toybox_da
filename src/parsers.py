@@ -55,25 +55,26 @@ def get_dual_ssl_class_mmd_v1_parser():
     """Return parser for the experiment"""
     parser = get_default_parser()
 
-    parser.add_argument("--tb-ssl-loss", choices=["simclr", "dcl", "sup_dcl"], default="dcl",
+    parser.add_argument("--tb-ssl-loss", choices=["simclr", "dcl", "sup_dcl"], default="sup_dcl",
                         help="Use this flag to choose ssl loss for toybox")
     parser.add_argument("--in12-ssl-loss", choices=["simclr", "dcl"], default="dcl",
                         help="Use this flag to choose ssl loss for in12")
     parser.add_argument("--tb-alpha", "-tba", default=1.0, type=float, help="Weight of TB contrastive loss in total "
                                                                             "loss")
-    parser.add_argument("--mmd-alpha", default=1.0, type=float, help="Weight of orientation loss in total loss")
+    parser.add_argument("--div-alpha", default=1.0, type=float, help="Weight of orientation loss in total loss")
     parser.add_argument("--in12-alpha", "-in12a", default=1.0, type=float, help="Weight of IN-12 contrastive loss in "
                                                                                 "total loss")
     parser.add_argument("--tb-ssl-type", "-tbssl", default="object", choices=['self', 'transform', 'object', 'class'],
                         help="Type of ssl for Toybox")
     parser.add_argument("--in12-ssl-type", "-in12ssl", default="self", choices=['self', 'class'],
                         help="Type of ssl for IN-12")
-    parser.add_argument("--ignore-mmd-loss", default=False, action='store_true', help="Use this flag to not use "
-                                                                                      "mmd loss for "
+    parser.add_argument("--ignore-div-loss", default=False, action='store_true', help="Use this flag to not use "
+                                                                                      "divergence loss for "
                                                                                       "training")
     parser.add_argument("--asymmetric", action='store_true', default=False, help="Use this flag to select asymmetric "
                                                                                  "mmd loss during training")
     parser.add_argument("--use-ot", default=False, action='store_true', help="Use this flag to use OT-based loss "
                                                                              "instead of MMD")
+    parser.add_argument("--div-metric", choices=["euclidean", "cosine"], default="cosine")
 
     return parser

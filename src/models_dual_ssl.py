@@ -126,7 +126,7 @@ class DualSSLOrientedModelV1:
             num_batches += 1
             if 0 <= step - halfway < 1:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                                 "OrL: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
+                                 "OrL: {:.3f}  Loss: {:.3f}  T: {:.2f}s".format(
                                     ep, ep_total, step, steps,
                                     optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                                     src_loss_total / num_batches, trgt_loss_total / num_batches,
@@ -159,7 +159,7 @@ class DualSSLOrientedModelV1:
                     global_step=(ep - 1) * steps + num_batches,
                 )
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                         "OrL: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
+                         "OrL: {:.3f}  Loss: {:.3f}  T: {:.2f}s".format(
                             ep, ep_total, steps, steps,
                             optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                             src_loss_total / num_batches, trgt_loss_total / num_batches,
@@ -172,7 +172,7 @@ class DualSSLClassMMDModelV1:
     """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
 
     def __init__(self, network, src_loader, trgt_loader, logger, no_save, tb_ssl_loss, in12_ssl_loss,
-                 tb_alpha, in12_alpha, mmd_alpha, ignore_mmd_loss, asymmetric, use_ot):
+                 tb_alpha, in12_alpha, div_alpha, ignore_div_loss, asymmetric, use_ot, div_metric):
         self.network = network
         self.src_loader = utils.ForeverDataLoader(src_loader)
         self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
@@ -184,29 +184,40 @@ class DualSSLClassMMDModelV1:
         self.in12_ssl_loss = in12_ssl_loss
         self.tb_alpha = tb_alpha
         self.in12_alpha = in12_alpha
-        self.mmd_alpha = mmd_alpha
-        self.ignore_mmd_loss = ignore_mmd_loss
+        self.div_alpha = div_alpha
+        self.ignore_div_loss = ignore_div_loss
         self.asymmetric = asymmetric
         self.use_ot = use_ot
+        self.div_metric = div_metric
 
-        if self.use_ot:
-            self.dist_loss = mmd_util.EMD1DLoss()
-        else:
-            self.dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
-                kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
-                         ),
-                linear=False,
-            ).cuda()
+        self.emd_dist_loss = mmd_util.EMD1DLoss()
+        self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+            kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+                     ),
+            linear=False,
+        ).cuda()
 
         num_params_trainable, num_params = self.network.count_trainable_parameters()
         self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
-        # torch.autograd.set_detect_anomaly(True)
+        torch.autograd.set_detect_anomaly(True)
 
-    def get_mmd_alpha(self, step, steps, ep, ep_total):
+    def get_distance(self, feats):
+        if self.div_metric == "cosine":
+            dist = func.cosine_similarity(feats.unsqueeze(1), feats.unsqueeze(0), dim=-1)
+        elif self.div_metric == "euclidean":
+            dist = torch.linalg.norm(feats.unsqueeze(1) - feats.unsqueeze(0), dim=-1, ord=2)
+        else:
+            dist = torch.matmul(feats, feats.transpose(0, 1))
+        assert dist.shape == (feats.shape[0], feats.shape[0]), f"{dist.shape}"
+        return dist
+
+    def get_div_alpha(self, step, steps, ep, ep_total):
+        if self.ignore_div_loss:
+            return 0.0
         total_steps = steps * ep_total
         curr_step = steps * (ep - 1) + step
         frac = 1 - 0.5 * (1 + np.cos(curr_step * np.pi / total_steps))
-        return self.mmd_alpha * frac
+        return self.div_alpha * frac
 
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
@@ -216,7 +227,8 @@ class DualSSLClassMMDModelV1:
         src_loss_total = 0.0
         trgt_loss_total = 0.0
         ssl_loss_total = 0.0
-        mmd_loss_total = 0.0
+        div_loss_mmd_total = 0.0
+        div_loss_emd_total = 0.0
         criterion = nn.CrossEntropyLoss()
         halfway = steps / 2.0
         start_time = time.time()
@@ -263,35 +275,45 @@ class DualSSLClassMMDModelV1:
             num_images_trgt = len(trgt_images[0])
             trgt_feats_1 = trgt_feats[:num_images_trgt]
 
-            if self.asymmetric:
-                src_feats_dists = torch.reshape(
-                    func.cosine_similarity(src_feats_stacked.unsqueeze(1),
-                                           src_feats_stacked.unsqueeze(0), dim=-1), (-1, 1)).clone().detach()
-
-            else:
-                src_feats_dists = torch.reshape(
-                    func.cosine_similarity(src_feats_stacked.unsqueeze(1),
-                                           src_feats_stacked.unsqueeze(0), dim=-1), (-1, 1))
-
-            trgt_feats_dists = torch.reshape(
-                func.cosine_similarity(trgt_feats_1.unsqueeze(1),
-                                       trgt_feats_1.unsqueeze(0), dim=-1), (-1, 1))
-            # print(src_feats_dists.shape, trgt_feats_dists.shape)
-            # return
-            # print(src_feats_dists.size(), trgt_feats_dists.size())
-            if self.use_ot:
-                mmd_dist_loss = self.dist_loss(src_feats_dists, trgt_feats_dists)
-            else:
-                mmd_dist_loss = self.dist_loss((src_feats_dists, ), (trgt_feats_dists, ))
-            mmd_alpha = self.get_mmd_alpha(steps=steps, step=step, ep=ep, ep_total=ep_total)
-            if self.ignore_mmd_loss:
+            div_alpha = self.get_div_alpha(steps=steps, step=step, ep=ep, ep_total=ep_total)
+            if self.ignore_div_loss:
                 loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss
-            else:
+                with torch.no_grad():
+                    src_feats_dists = self.get_distance(src_feats_stacked)
+                    if self.asymmetric:
+                        src_feats_dists = torch.reshape(src_feats_dists, (-1, 1)).clone().detach()
 
-                loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + mmd_alpha * mmd_dist_loss
+                    else:
+                        src_feats_dists = torch.reshape(src_feats_dists, (-1, 1))
+
+                    trgt_feats_dists = self.get_distance(trgt_feats_1)
+                    trgt_feats_dists = torch.reshape(trgt_feats_dists, (-1, 1))
+
+                    div_dist_emd_loss = self.emd_dist_loss(src_feats_dists, trgt_feats_dists)
+                    div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists,), (trgt_feats_dists,))
+            else:
+                src_feats_dists = self.get_distance(src_feats_stacked)
+                if self.asymmetric:
+                    src_feats_dists = torch.reshape(src_feats_dists, (-1, 1)).clone().detach()
+
+                else:
+                    src_feats_dists = torch.reshape(src_feats_dists, (-1, 1))
+
+                trgt_feats_dists = self.get_distance(trgt_feats_1)
+                trgt_feats_dists = torch.reshape(trgt_feats_dists, (-1, 1))
+                if self.use_ot:
+                    div_dist_emd_loss = self.emd_dist_loss(src_feats_dists, trgt_feats_dists)
+                    div_dist_mmd_loss = torch.tensor([0.])
+                    loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + div_alpha * div_dist_emd_loss
+                else:
+                    div_dist_emd_loss = torch.tensor([0.])
+                    div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists, ), (trgt_feats_dists, ))
+                    loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + div_alpha * div_dist_mmd_loss
+
             src_loss_total += src_loss.item()
             trgt_loss_total += trgt_loss.item()
-            mmd_loss_total += mmd_dist_loss.item()
+            div_loss_emd_total += div_dist_emd_loss.item()
+            div_loss_mmd_total += div_dist_mmd_loss.item()
             loss.backward()
 
             optimizer.step()
@@ -302,11 +324,11 @@ class DualSSLClassMMDModelV1:
             num_batches += 1
             if 0 <= step - halfway < 1:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                                 "MMDA: {:3.2e}  MMD: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
+                                 "Div-A: {:3.2e}  EMD: {:.3f}  MMD: {:.3f}  Loss: {:.3f}  T: {:.2f}s".format(
                                     ep, ep_total, step, steps,
                                     optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                                     src_loss_total / num_batches, trgt_loss_total / num_batches,
-                                    mmd_alpha, mmd_loss_total / num_batches,
+                                    div_alpha, div_loss_emd_total / num_batches, div_loss_mmd_total / num_batches,
                                     ssl_loss_total / num_batches, time.time() - start_time)
                                  )
 
@@ -316,8 +338,10 @@ class DualSSLClassMMDModelV1:
                         'src_ssl_loss_batch': src_loss.item(),
                         'trgt_ssl_loss_ep': trgt_loss_total / num_batches,
                         'trgt_ssl_loss_batch': trgt_loss.item(),
-                        'mmd_loss_ep': mmd_loss_total / num_batches,
-                        'mmd_loss_batch': mmd_dist_loss.item(),
+                        'div_loss_emd_ep': div_loss_emd_total / num_batches,
+                        'div_loss_emd_batch': div_dist_emd_loss.item(),
+                        'div_loss_mmd_ep': div_loss_mmd_total / num_batches,
+                        'div_loss_mmd_batch': div_dist_mmd_loss.item(),
                         'ssl_loss_ep': ssl_loss_total / num_batches,
                         'ssl_loss_batch': loss.item(),
                     }
@@ -334,12 +358,12 @@ class DualSSLClassMMDModelV1:
                     },
                     global_step=(ep - 1) * steps + num_batches,
                 )
-        mmd_alpha = self.get_mmd_alpha(steps=steps, step=steps, ep=ep, ep_total=ep_total)
+        div_alpha = self.get_div_alpha(steps=steps, step=steps, ep=ep, ep_total=ep_total)
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                         "MMDA: {:3.2e}  MMD: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
+                         "Div-A: {:3.2e}  EMD: {:.3f}  MMD: {:.3f}  Loss: {:.3f}  T: {:.2f}s".format(
                             ep, ep_total, steps, steps,
                             optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                             src_loss_total / num_batches, trgt_loss_total / num_batches,
-                            mmd_alpha, mmd_loss_total / num_batches,
+                            div_alpha, div_loss_emd_total / num_batches, div_loss_mmd_total / num_batches,
                             ssl_loss_total / num_batches, time.time() - start_time)
                          )
