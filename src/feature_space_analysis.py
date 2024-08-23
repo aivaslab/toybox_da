@@ -1,9 +1,10 @@
+import argparse
 import os
-
 import numpy as np
 import csv
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from PIL import Image
 
 import torch
 
@@ -104,7 +105,7 @@ def get_activation_points(path, dataset):
     return act_data
 
 
-def get_intra_domain_dist_histograms(path, title):
+def gen_intra_domain_dist_histograms(path, title):
     act_path = path + "analysis/final_model/backbone/activations/"
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
     max_val = -np.inf
@@ -164,15 +165,28 @@ def get_intra_domain_dist_histograms(path, title):
 
         plot_histogram(axis=axes[idx][1], data=[cl_match_dists, super_cl_match_dists, super_cl_mismatch_dists],
                        n_bins=100, x_range=(0.0, max_val),
-                       labels=["class_match", "superclass_match", "superclass_match"], ax_title=dset)
+                       labels=["class_match", "superclass_match", "superclass_mismatch"], ax_title=dset)
 
+    histogram_fname = f"{act_path}/intra_domain_dist_histogram.jpeg"
     fig.tight_layout(pad=2.0, h_pad=1.5)
-    plt.savefig(f"{act_path}/intra_domain_dist_histogram.jpeg")
-    plt.suptitle(title, fontsize='large')
+    fig.suptitle(title, fontsize='x-large')
+    plt.savefig(histogram_fname)
     plt.close()
+    return histogram_fname
+
+
+def plot_and_show_histogram(path, title):
+    hist_fname = gen_intra_domain_dist_histograms(path=path, title=title)
+    img = Image.open(hist_fname)
+    return img
 
 
 if __name__ == "__main__":
-    model_path = "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_no_dom_mmd_trial_500/"
-    get_intra_domain_dist_histograms(model_path, title="dual_ssl_no_dom_mmd")
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model-path', type=str, required=True,
+                        help='Model path for which histogram has to be computed')
+    args = vars(parser.parse_args())
+    # "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_no_dom_mmd_trial_500/"
+    model_path = args['model_path']
+    hist_img = plot_and_show_histogram(model_path, title="dual_ssl_no_dom_mmd")
+    hist_img.show()
