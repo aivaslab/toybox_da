@@ -246,21 +246,21 @@ def gen_feat_gmm_emd(umap_path, norm, use_umap=True):
             means, covs, weights = gmm_means_dict[key], gmm_covs_dict[key], gmm_weights_dict[key]
 
             st_time = time.time()
-            # for trgt_dset in DATASETS:
-            for trgt_cl in TB_CLASSES:
-                if cl == trgt_cl:
-                    ot_dict[(dset, cl, dset, cl)] = [0.0]
-                else:
-                    dict_key = (dset, cl, dset, trgt_cl)
-                    if dict_key not in ot_dict:
-                        trgt_key = (dset, trgt_cl)
-                        trgt_means, trgt_covs, trgt_weights = \
-                            gmm_means_dict[trgt_key], gmm_covs_dict[trgt_key], gmm_weights_dict[trgt_key]
-                        costs, ot_map, dist = um.GW2(weights, means, covs, trgt_weights, trgt_means, trgt_covs)
-                        ot_dict[(dset, cl, dset, trgt_cl)] = [dist]
-                        ot_dict[(dset, trgt_cl, dset, cl)] = [dist]
+            for trgt_dset in DATASETS:
+                for trgt_cl in TB_CLASSES:
+                    if dset == trgt_dset and cl == trgt_cl:
+                        ot_dict[(dset, cl, dset, cl)] = [0.0]
+                    else:
+                        dict_key = (dset, cl, trgt_dset, trgt_cl)
+                        if dict_key not in ot_dict:
+                            trgt_key = (trgt_dset, trgt_cl)
+                            trgt_means, trgt_covs, trgt_weights = \
+                                gmm_means_dict[trgt_key], gmm_covs_dict[trgt_key], gmm_weights_dict[trgt_key]
+                            costs, ot_map, dist = um.GW2(weights, means, covs, trgt_weights, trgt_means, trgt_covs)
+                            ot_dict[(dset, cl, trgt_dset, trgt_cl)] = [dist]
+                            ot_dict[(trgt_dset, trgt_cl, dset, cl)] = [dist]
 
-                count += 1
+                    count += 1
             tot_time += time.time() - st_time
             print(dset, cl, round(time.time() - st_time, 2), round(tot_time / count, 2))
 
