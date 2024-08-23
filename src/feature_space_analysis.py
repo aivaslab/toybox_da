@@ -7,6 +7,7 @@ import matplotlib as mpl
 from PIL import Image
 
 import torch
+import torch.nn.functional as func
 
 UMAP_FILENAMES = ["tb_train.csv", "tb_test.csv", "in12_train.csv", "in12_test.csv"]
 NORM_UMAP_FILENAMES = ["tb_train_norm.csv", "tb_test_norm.csv", "in12_train_norm.csv", "in12_test_norm.csv"]
@@ -46,7 +47,7 @@ SRC_FILES = {
 }
 
 
-def get_dist_matrix(feats):
+def get_dist_matrix(feats, metric):
     n, dim = feats.size(0), feats.size(1)
     all_dists = torch.zeros((n, n), dtype=torch.float32).cuda()
 
@@ -58,7 +59,10 @@ def get_dist_matrix(feats):
 
     for i, chunk_1 in enumerate(chunks):
         for j, chunk_2 in enumerate(chunks):
-            dist = ((chunk_1.unsqueeze(1) - chunk_2.unsqueeze(0)) ** 2).sum(dim=-1) ** 0.5
+            if metric == "cosine":
+                dist = 1 - func.cosine_similarity(chunk_1.unsqueeze(1), chunk_2.unsqueeze(0), dim=-1)
+            else:
+                dist = ((chunk_1.unsqueeze(1) - chunk_2.unsqueeze(0)) ** 2).sum(dim=-1) ** 0.5
             assert dist.shape == (chunk_size, chunk_size)
             all_dists[i*chunk_size: i*chunk_size + chunk_size, j*chunk_size: j*chunk_size + chunk_size] = dist
 
@@ -105,14 +109,28 @@ def get_activation_points(path, dataset):
     return act_data
 
 
-def gen_intra_domain_dist_histograms(path, title):
+def plot_histogram(axis, data, n_bins, x_range, labels, ax_title):
+    colors = []
+    cmap_name = 'tab10'
+    for data_idx in range(len(data)):
+        colors.append(mpl.colormaps[cmap_name].colors[data_idx])
+
+    axis.hist(data, stacked=False, bins=n_bins, range=x_range, label=labels, color=colors)
+    for data_idx in range(len(data)):
+        partial_data = data[data_idx]
+        axis.axvline(np.mean(partial_data), color=colors[data_idx], linestyle='dashed', linewidth=2)
+    axis.legend(loc="upper left", fontsize="large")
+    axis.set_title(ax_title)
+
+
+def gen_intra_domain_dist_histograms(path, metric, title):
     act_path = path + "analysis/final_model/backbone/activations/"
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
     max_val = -np.inf
     for idx, dset in enumerate(["toybox_train", "in12_train"]):
         activations = get_activation_points(path=act_path, dataset=dset)
-        dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda())
-        q99 = np.quantile(dist_matrix, q=0.99)
+        dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+        q99 = np.quantile(dist_matrix, q=0.999)
         max_val = max(max_val, q99)
 
     cl_match_mat = np.eye(len(TB_CLASSES), dtype=bool)
@@ -131,22 +149,9 @@ def gen_intra_domain_dist_histograms(path, title):
     super_cl_mismatch_mat = ~(cl_match_mat | super_cl_match_mat)
     # print(max_val)
 
-    def plot_histogram(axis, data, n_bins, x_range, labels, ax_title):
-        colors = []
-        cmap_name = 'tab10'
-        for data_idx in range(len(data)):
-            colors.append(mpl.colormaps[cmap_name].colors[data_idx])
-
-        axis.hist(data, stacked=False, bins=n_bins, range=x_range, label=labels, color=colors)
-        for data_idx in range(len(data)):
-            partial_data = data[data_idx]
-            axis.axvline(np.median(partial_data), color=colors[data_idx], linestyle='dashed', linewidth=2)
-        axis.legend(loc="upper right", fontsize="large")
-        axis.set_title(ax_title)
-
     for idx, dset in enumerate(["toybox_train", "in12_train"]):
         activations = get_activation_points(path=act_path, dataset=dset)
-        dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda())
+        dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
 
         cl_match_dists = dist_matrix[cl_match_mat]
         cl_mismatch_dists = dist_matrix[cl_mismatch_mat]
@@ -156,6 +161,7 @@ def gen_intra_domain_dist_histograms(path, title):
 
         plot_histogram(axis=axes[idx][0], data=[cl_match_dists, cl_mismatch_dists], n_bins=100,
                        x_range=(0.0, max_val), labels=["class_match", "class_mismatch"], ax_title=dset)
+        axes[idx][0].axvline(np.mean(dist_matrix), color='black', linestyle='dashed', linewidth=2)
 
         super_cl_match_dists = dist_matrix[super_cl_match_mat]
         super_cl_mismatch_dists = dist_matrix[super_cl_mismatch_mat]
@@ -166,8 +172,9 @@ def gen_intra_domain_dist_histograms(path, title):
         plot_histogram(axis=axes[idx][1], data=[cl_match_dists, super_cl_match_dists, super_cl_mismatch_dists],
                        n_bins=100, x_range=(0.0, max_val),
                        labels=["class_match", "superclass_match", "superclass_mismatch"], ax_title=dset)
+        axes[idx][1].axvline(np.mean(dist_matrix), color='black', linestyle='dashed', linewidth=2)
 
-    histogram_fname = f"{act_path}/intra_domain_dist_histogram.jpeg"
+    histogram_fname = f"{act_path}/intra_domain_dist_histogram_{metric}.jpeg"
     fig.tight_layout(pad=2.0, h_pad=1.5)
     fig.suptitle(title, fontsize='x-large')
     plt.savefig(histogram_fname)
@@ -175,18 +182,105 @@ def gen_intra_domain_dist_histograms(path, title):
     return histogram_fname
 
 
-def plot_and_show_histogram(path, title):
-    hist_fname = gen_intra_domain_dist_histograms(path=path, title=title)
+def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, superclass_split, title):
+    fig, axes = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5*len(paths)), sharex=True, sharey=True)
+    max_val = -np.inf
+    for path in paths:
+        act_path = path + "analysis/final_model/backbone/activations/"
+        for idx, dset in enumerate(["toybox_train", "in12_train"]):
+            activations = get_activation_points(path=act_path, dataset=dset)
+            dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            q99 = np.quantile(dist_matrix, q=0.999)
+            max_val = max(max_val, q99)
+
+    cl_match_mat = np.eye(len(TB_CLASSES), dtype=bool)
+    super_cl_match_mat = np.zeros((12, 12), dtype=bool)
+    for i, cl_1 in enumerate(TB_CLASSES):
+        for j, cl_2 in enumerate(TB_CLASSES):
+            if cl_1 != cl_2 and SUPER_CATEGORIES[cl_1] == SUPER_CATEGORIES[cl_2]:
+                super_cl_match_mat[i][j] = True
+
+    cl_match_mat = np.repeat(cl_match_mat, 1500, axis=1)
+    cl_match_mat = np.repeat(cl_match_mat, 1500, axis=0)
+    cl_mismatch_mat = ~cl_match_mat
+
+    super_cl_match_mat = np.repeat(super_cl_match_mat, 1500, axis=1)
+    super_cl_match_mat = np.repeat(super_cl_match_mat, 1500, axis=0)
+    super_cl_mismatch_mat = ~(cl_match_mat | super_cl_match_mat)
+    # print(max_val)
+    for path_idx, path in enumerate(paths):
+        act_path = path + "analysis/final_model/backbone/activations/"
+        for idx, dset in enumerate(["toybox_train", "in12_train"]):
+            activations = get_activation_points(path=act_path, dataset=dset)
+            dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+
+            cl_match_dists = dist_matrix[cl_match_mat]
+            cl_mismatch_dists = dist_matrix[cl_mismatch_mat]
+            assert len(cl_match_dists) == 1500 * 1500 * 12
+            assert len(cl_mismatch_dists) == 1500 * 1500 * 11 * 12
+
+            super_cl_match_dists = dist_matrix[super_cl_match_mat]
+            super_cl_mismatch_dists = dist_matrix[super_cl_mismatch_mat]
+            assert len(super_cl_match_dists) == 1500 * 1500 * 3 * 12
+            assert len(super_cl_mismatch_dists) == 1500 * 1500 * 8 * 12
+
+            if superclass_split:
+                data, labels = [cl_match_dists, super_cl_match_dists, super_cl_mismatch_dists], \
+                                ["class_match", "superclass_match", "super_class_mismatch"]
+            else:
+                data, labels = [cl_match_dists, cl_mismatch_dists], ["class_match", "superclass_match"]
+
+            plot_histogram(axis=axes[path_idx][idx], data=data, n_bins=100,
+                           x_range=(0.0, max_val), labels=labels, ax_title=f"{row_titles[path_idx]}-{dset}")
+            axes[path_idx][idx].axvline(np.mean(dist_matrix), color='black', linestyle='dashed', linewidth=2)
+
+    # histogram_fname = f"{act_path}/intra_domain_dist_histogram_{metric}.jpeg"
+    fig.tight_layout(pad=2.0, h_pad=1.5)
+    fig.suptitle(title, fontsize='x-large', y=1.0)
+    # plt.savefig(histogram_fname)
+    plt.show()
+    plt.close()
+    del activations, dist_matrix, cl_match_dists, cl_mismatch_dists, super_cl_match_dists, super_cl_mismatch_dists
+    # return histogram_fname
+
+
+def plot_and_show_histogram(path, metric, title):
+    hist_fname = gen_intra_domain_dist_histograms(path=path, title=title, metric=metric)
     img = Image.open(hist_fname)
     return img
 
 
-if __name__ == "__main__":
+def run_sole_histogram():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model-path', type=str, required=True,
                         help='Model path for which histogram has to be computed')
+    parser.add_argument("--dist-metric", "-dist", choices=['euclidean', 'cosine'], default='euclidean',
+                        help="Use this option to set the distance metric")
     args = vars(parser.parse_args())
     # "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_no_dom_mmd_trial_500/"
     model_path = args['model_path']
-    hist_img = plot_and_show_histogram(model_path, title="dual_ssl_no_dom_mmd")
+    dist_metric = args['dist_metric']
+    hist_img = plot_and_show_histogram(model_path, title="dual_ssl_no_dom_mmd", metric=dist_metric)
     hist_img.show()
+
+
+def run_comparative_histograms():
+    dual_ssl_1 = "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_no_dom_mmd_trial_500/"
+    dual_ssl_2 = "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_no_dom_ot_trial_500/"
+    dual_ssl_3 = "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_no_dom_ot_cosine_trial_500/"
+    dual_ssl_symmetric_mmd = "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_dom_mmd_trial_500/"
+    dual_ssl_asymmetric_mmd = "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_asymm_dom_mmd_trial_500/"
+    dual_ssl_symmetric_ot = "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_dom_ot_trial_500/"
+    dual_ssl_symmetric_cosine_ot = "../out/DUAL_SSL_DOM_MMD_V1/dual_ssl_dom_ot_cosine_trial_500/"
+
+    paths = [dual_ssl_1, dual_ssl_2, dual_ssl_3, dual_ssl_symmetric_mmd, dual_ssl_asymmetric_mmd,
+             dual_ssl_symmetric_ot, dual_ssl_symmetric_cosine_ot]
+    labels = ["dual_ssl_1", "dual_ssl_2", "dual_ssl_3", "dual_ssl_symmetric_mmd", "dual_ssl_asymmetric_mmd",
+              "dual_ssl_symmetric_ot", "dual_ssl_symmetric_cosine_ot"]
+
+    gen_comparative_intra_domain_dist_histograms(paths=paths, metric="cosine", row_titles=labels,
+                                                 superclass_split=True, title="Comparative analysis-cosine")
+
+
+if __name__ == "__main__":
+    run_comparative_histograms()
