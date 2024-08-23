@@ -19,7 +19,7 @@ class EMD1DLoss(nn.Module):
         loss = torch.sum(dist_matrix * ot_map)
         # print(loss, loss.requires_grad)
 
-        return loss
+        return loss / z_s.shape[0]
 
 
 class JointMultipleKernelMaximumMeanDiscrepancy(nn.Module):
