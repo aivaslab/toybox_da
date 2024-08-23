@@ -6,6 +6,7 @@ import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as func
 
 import utils
 
@@ -180,7 +181,7 @@ class ModelKNNEval:
         for train_chunk_idx, train_chunk in enumerate(train_chunks):
             for eval_chunk_idx, eval_chunk in enumerate(eval_chunks):
                 if use_cosine:
-                    dist_mat = torch.matmul(eval_chunk, train_chunk.transpose(0, 1))
+                    dist_mat = func.cosine_similarity(eval_chunk.unsqueeze(1), train_chunk.unsqueeze(0), dim=-1)
                 else:
                     dist_mat = ((eval_chunk.unsqueeze(1) - train_chunk.unsqueeze(0)) ** 2).sum(-1)
                 distance_matrix[

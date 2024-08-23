@@ -172,7 +172,6 @@ def run_knn_eval(exp_args, ):
 
     if not no_save:
         tb_writer.close()
-        net.save_model(fpath=tb_path + "final_model.pt")
 
         exp_args['train_acc'] = tr_accs
         exp_args['test_acc'] = te_accs
@@ -180,14 +179,14 @@ def run_knn_eval(exp_args, ):
         exp_args['train_transform'] = str(transform)
         utils.save_args(path=tb_path, args=exp_args)
         logger.info("Experimental details and results saved to {}".format(tb_path))
-        train_loader_name = "tb_train" if exp_args['dataset'] == "toybox" else "in12_train"
-        test_loader_name = "tb_test" if exp_args['dataset'] == "toybox" else "in12_test"
-        all_loaders = {
-            train_loader_name: src_loader_train,
-            test_loader_name: src_loader_test
-        }
-        save_model_prediction_val(model=pre_model, all_loaders=all_loaders, out_path=tb_path + "output/final_model/",
-                                  logger=logger)
+        # train_loader_name = "tb_train" if exp_args['dataset'] == "toybox" else "in12_train"
+        # test_loader_name = "tb_test" if exp_args['dataset'] == "toybox" else "in12_test"
+        # all_loaders = {
+        #     train_loader_name: src_loader_train,
+        #     test_loader_name: src_loader_test
+        # }
+        # save_model_prediction_val(model=pre_model, all_loaders=all_loaders, out_path=tb_path + "output/final_model/",
+        #                           logger=logger)
 
 
 if __name__ == "__main__":
