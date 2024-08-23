@@ -6,6 +6,7 @@ from scipy import linalg
 import sklearn.decomposition as decom
 import numpy as np
 import bisect
+import torch
 
 DATASETS = ["toybox_train", "toybox_test", "in12_train", "in12_test"]
 TB_CLASSES = ['airplane', 'ball', 'car', 'cat', 'cup', 'duck', 'giraffe', 'horse', 'helicopter', 'mug', 'spoon',
@@ -117,6 +118,30 @@ def normalize_2d_arr(arr: np.ndarray) -> np.ndarray:
     return ret_arr
 
 
+def calculate_frechet_distance_torch(mu1, sigma1, mu2, sigma2):
+    mu1_torch, mu2_torch, sigma1_torch, sigma2_torch = torch.from_numpy(mu1).cuda(), torch.from_numpy(mu2).cuda(), \
+                                                        torch.from_numpy(sigma1).cuda(), torch.from_numpy(sigma2).cuda()
+    with torch.no_grad():
+        mean_diff = mu1_torch - mu2_torch
+        mean_diff_squared = mean_diff.square().sum(dim=-1)
+
+        # Calculate the sum of the traces of both covariance matrices
+        trace_sum = sigma1_torch.trace() + sigma2_torch.trace()
+
+        # Compute the eigenvalues of the matrix product of the real and fake covariance matrices
+        sigma_mm = torch.matmul(sigma1_torch, sigma2_torch)
+        eigenvals = torch.linalg.eigvals(sigma_mm)
+
+        # Take the square root of each eigenvalue and take its sum
+        sqrt_eigenvals_sum = eigenvals.sqrt().real.sum(dim=-1)
+
+        # Calculate the FID using the squared distance between the means,
+        # the sum of the traces of the covariance matrices, and the sum of the square roots of the eigenvalues
+        fid = mean_diff_squared + trace_sum - 2 * sqrt_eigenvals_sum
+
+    return fid
+
+
 def calculate_frechet_distance(mu1, sigma1, mu2, sigma2):
     ssdiff = np.sum((mu1 - mu2) ** 2.0)
     product = np.array(sigma1.dot(sigma2))
@@ -126,6 +151,19 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2):
     if np.iscomplexobj(covmean):
         covmean = covmean.real
     return round(ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean), 2)
+
+
+def calculate_frechet_distance_2(mu1, sigma1, mu2, sigma2):
+    ssdiff = np.sum((mu1 - mu2) ** 2.0)
+    product = np.matmul(sigma1, sigma2)
+    # if product.ndim < 2:
+    #     product = product.reshape(-1, 1)
+    eigenvals = linalg.eigvals(product)
+    # covmean = linalg.sqrtm(product)
+    if np.iscomplexobj(eigenvals):
+        eigenvals = eigenvals.real
+    sqrt_eigenvals_sum = np.sqrt(eigenvals).sum(axis=-1)
+    return round(ssdiff + np.trace(sigma1 + sigma2 - 2.0 * sqrt_eigenvals_sum), 2)
 
 
 def get_frechet_arrs(mean_dicts: dict, cov_dicts: dict, key: int) -> (np.ndarray, np.ndarray):
