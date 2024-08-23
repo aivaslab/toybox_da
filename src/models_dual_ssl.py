@@ -4,6 +4,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as func
 import torch.utils.tensorboard as tb
 
 import utils
@@ -264,13 +265,19 @@ class DualSSLClassMMDModelV1:
 
             if self.asymmetric:
                 src_feats_dists = torch.reshape(
-                    torch.matmul(src_feats_stacked,
-                                 src_feats_stacked.transpose(0, 1)),
-                    (-1, 1)).clone().detach()
+                    func.cosine_similarity(src_feats_stacked.unsqueeze(1),
+                                           src_feats_stacked.unsqueeze(0), dim=-1), (-1, 1)).clone().detach()
+
             else:
                 src_feats_dists = torch.reshape(
-                    torch.matmul(src_feats_stacked, src_feats_stacked.transpose(0, 1)), (-1, 1))
-            trgt_feats_dists = torch.reshape(torch.matmul(trgt_feats_1, trgt_feats_1.transpose(0, 1)), (-1, 1))
+                    func.cosine_similarity(src_feats_stacked.unsqueeze(1),
+                                           src_feats_stacked.unsqueeze(0), dim=-1), (-1, 1))
+
+            trgt_feats_dists = torch.reshape(
+                func.cosine_similarity(trgt_feats_1.unsqueeze(1),
+                                       trgt_feats_1.unsqueeze(0), dim=-1), (-1, 1))
+            # print(src_feats_dists.shape, trgt_feats_dists.shape)
+            # return
             # print(src_feats_dists.size(), trgt_feats_dists.size())
             if self.use_ot:
                 mmd_dist_loss = self.dist_loss(src_feats_dists, trgt_feats_dists)
@@ -295,7 +302,7 @@ class DualSSLClassMMDModelV1:
             num_batches += 1
             if 0 <= step - halfway < 1:
                 self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                                 "MMDA: {:.3f}  MMD: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
+                                 "MMDA: {:3.2e}  MMD: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
                                     ep, ep_total, step, steps,
                                     optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                                     src_loss_total / num_batches, trgt_loss_total / num_batches,
@@ -329,7 +336,7 @@ class DualSSLClassMMDModelV1:
                 )
         mmd_alpha = self.get_mmd_alpha(steps=steps, step=steps, ep=ep, ep_total=ep_total)
         self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                         "MMDA: {:.3f}  MMD: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
+                         "MMDA: {:3.2e}  MMD: {:.3f}  SSL: {:.3f}  T: {:.2f}s".format(
                             ep, ep_total, steps, steps,
                             optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                             src_loss_total / num_batches, trgt_loss_total / num_batches,
