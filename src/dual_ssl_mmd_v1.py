@@ -106,7 +106,8 @@ def run_training(exp_args):
                                                        tb_ssl_loss=tb_ssl_loss, in12_ssl_loss=in12_ssl_loss,
                                                        tb_alpha=tb_alpha, in12_alpha=in12_alpha,
                                                        div_alpha=div_alpha, ignore_div_loss=ignore_div_loss,
-                                                       asymmetric=asymmetric, use_ot=use_ot, div_metric=div_metric)
+                                                       asymmetric=asymmetric, use_ot=use_ot, div_metric=div_metric,
+                                                       fixed_div_alpha=True)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
                                 momentum=0.9, nesterov=True)
