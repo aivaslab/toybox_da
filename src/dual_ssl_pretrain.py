@@ -48,6 +48,8 @@ def get_parser():
                         help="Type of ssl for IN-12")
     parser.add_argument("--combined", "-c", default=False, action='store_true', help="Use this flag for combined SSL "
                                                                                      "training")
+    parser.add_argument("--track-knn-acc", default=False, action='store_true', help="Use this flag to track "
+                                                                                    "within-batch accuracy with knn")
     return vars(parser.parse_args())
 
 
@@ -67,6 +69,7 @@ def main():
     in12_ssl_type = exp_args['in12_ssl_type']
     save_freq = exp_args['save_freq']
     combined = exp_args['combined']
+    track_knn_acc = exp_args['track_knn_acc']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
     gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
@@ -126,7 +129,8 @@ def main():
         net = networks.ResNet18SSL()
     ssl_model = models.DualSSLModel(network=net, src_loader=tb_loader_train, trgt_loader=in12_loader_train,
                                     logger=logger, no_save=no_save, decoupled=decoupled_loss,
-                                    tb_alpha=tb_alpha, in12_alpha=in12_alpha, combined=combined)
+                                    tb_alpha=tb_alpha, in12_alpha=in12_alpha, combined=combined,
+                                    track_knn_acc=track_knn_acc)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
                                 momentum=0.9, nesterov=True)

@@ -172,7 +172,8 @@ class DualSSLClassMMDModelV1:
     """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
 
     def __init__(self, network, src_loader, trgt_loader, logger, no_save, tb_ssl_loss, in12_ssl_loss,
-                 tb_alpha, in12_alpha, div_alpha, ignore_div_loss, asymmetric, use_ot, div_metric):
+                 tb_alpha, in12_alpha, div_alpha, ignore_div_loss, asymmetric, use_ot, div_metric,
+                 fixed_div_alpha):
         self.network = network
         self.src_loader = utils.ForeverDataLoader(src_loader)
         self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
@@ -189,6 +190,7 @@ class DualSSLClassMMDModelV1:
         self.asymmetric = asymmetric
         self.use_ot = use_ot
         self.div_metric = div_metric
+        self.fixed_div_alpha = fixed_div_alpha
 
         self.emd_dist_loss = mmd_util.EMD1DLoss()
         self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
@@ -214,6 +216,8 @@ class DualSSLClassMMDModelV1:
     def get_div_alpha(self, step, steps, ep, ep_total):
         if self.ignore_div_loss:
             return 0.0
+        if self.fixed_div_alpha:
+            return self.div_alpha
         total_steps = steps * ep_total
         curr_step = steps * (ep - 1) + step
         frac = 1 - 0.5 * (1 + np.cos(curr_step * np.pi / total_steps))
