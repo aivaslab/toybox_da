@@ -860,7 +860,7 @@ class ToyboxDatasetSSL(torchdata.Dataset):
     def __getitem__(self, index):
         actualIndex = self.indicesSelected[index]
         img = np.array(cv2.imdecode(self.train_data[actualIndex], 3))
-        label = self.train_csvFile[actualIndex]['Class ID']
+        label = int(self.train_csvFile[actualIndex]['Class ID'])
 
         if self.distort == 'self':
             img2 = img
@@ -906,7 +906,7 @@ class ToyboxDatasetSSL(torchdata.Dataset):
         else:
             imgs = [img, img2]
 
-        return (index, actualIndex), imgs
+        return (index, actualIndex), imgs, label
 
     def __str__(self):
         return "Toybox SSL"

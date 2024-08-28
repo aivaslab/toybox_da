@@ -36,8 +36,6 @@ def get_parser():
     parser.add_argument("--no-save", action='store_true', default=False, help="Use this option to disable saving")
     parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
     parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of saving models")
-    parser.add_argument("--decoupled", action='store_true', default=False, help="This flag allows us  to use "
-                                                                                "decoupled contrastive loss")
     parser.add_argument("--tb-alpha", "-tba", default=1.0, type=float, help="Weight of TB contrastive loss in total "
                                                                            "loss")
     parser.add_argument("--in12-alpha", "-in12a", default=1.0, type=float, help="Weight of IN-12 contrastive loss in "
@@ -46,6 +44,10 @@ def get_parser():
                         help="Type of ssl for Toybox")
     parser.add_argument("--in12-ssl-type", "-in12ssl", default="self", choices=['self', 'class'],
                         help="Type of ssl for IN-12")
+    parser.add_argument("--tb-ssl-loss", choices=["simclr", "dcl", "sup_dcl"], default="sup_dcl",
+                        help="Use this flag to choose ssl loss for toybox")
+    parser.add_argument("--in12-ssl-loss", choices=["simclr", "dcl"], default="dcl",
+                        help="Use this flag to choose ssl loss for in12")
     parser.add_argument("--combined", "-c", default=False, action='store_true', help="Use this flag for combined SSL "
                                                                                      "training")
     parser.add_argument("--track-knn-acc", default=False, action='store_true', help="Use this flag to track "
@@ -61,7 +63,6 @@ def main():
     workers = exp_args['workers']
     no_save = exp_args['no_save']
     save_dir = exp_args['save_dir']
-    decoupled_loss = exp_args['decoupled']
     tb_alpha = exp_args['tb_alpha']
     in12_alpha = exp_args['in12_alpha']
     hypertune = not exp_args['final']
@@ -69,6 +70,8 @@ def main():
     in12_ssl_type = exp_args['in12_ssl_type']
     save_freq = exp_args['save_freq']
     combined = exp_args['combined']
+    tb_ssl_loss = exp_args['tb_ssl_loss']
+    in12_ssl_loss = exp_args['in12_ssl_loss']
     track_knn_acc = exp_args['track_knn_acc']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
@@ -128,8 +131,9 @@ def main():
     else:
         net = networks.ResNet18SSL()
     ssl_model = models.DualSSLModel(network=net, src_loader=tb_loader_train, trgt_loader=in12_loader_train,
-                                    logger=logger, no_save=no_save, decoupled=decoupled_loss,
+                                    logger=logger, no_save=no_save,
                                     tb_alpha=tb_alpha, in12_alpha=in12_alpha, combined=combined,
+                                    tb_ssl_loss=tb_ssl_loss, in12_ssl_loss=in12_ssl_loss,
                                     track_knn_acc=track_knn_acc)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
