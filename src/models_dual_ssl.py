@@ -256,8 +256,8 @@ class DualSSLClassMMDModelV1:
             src_feats, trgt_feats = feats[:src_size], feats[src_size:]
             # print(src_feats.shape, trgt_feats.shape)
             if self.tb_ssl_loss == "simclr":
-                src_logits, src_labels = utils.info_nce_loss(features=src_feats, temp=0.5)
-                src_loss = criterion(src_logits, src_labels)
+                src_logits, src_labels_info_nce = utils.info_nce_loss(features=src_feats, temp=0.5)
+                src_loss = criterion(src_logits, src_labels_info_nce)
             elif self.tb_ssl_loss == "dcl":
                 src_loss = utils.decoupled_contrastive_loss(features=src_feats, temp=0.1)
             else:
@@ -268,7 +268,6 @@ class DualSSLClassMMDModelV1:
             if self.in12_ssl_loss == "dcl":
                 trgt_loss = utils.decoupled_contrastive_loss(features=trgt_feats, temp=0.1)
             else:
-
                 trgt_logits, trgt_labels = utils.info_nce_loss(features=trgt_feats, temp=0.5)
                 trgt_loss = criterion(trgt_logits, trgt_labels)
 

@@ -51,9 +51,9 @@ def get_dist_matrix(feats, metric):
     n, dim = feats.size(0), feats.size(1)
     all_dists = torch.zeros((n, n), dtype=torch.float32).cuda()
 
-    chunk_size = n // 12
+    chunk_size = n // 120
 
-    chunks = torch.chunk(feats, 12, dim=0)
+    chunks = torch.chunk(feats, 120, dim=0)
     for chunk in chunks:
         assert chunk.shape == (chunk_size, 512)
 
@@ -121,10 +121,11 @@ def plot_histogram(axis, data, n_bins, x_range, labels, ax_title):
         axis.axvline(np.mean(partial_data), color=colors[data_idx], linestyle='dashed', linewidth=2)
     axis.legend(loc="upper left", fontsize="large")
     axis.set_title(ax_title)
+    axis.tick_params(axis='both', which='both', labelsize=10, labelbottom=True)
 
 
-def gen_intra_domain_dist_histograms(path, metric, title):
-    act_path = path + "analysis/final_model/backbone/activations/"
+def gen_intra_domain_dist_histograms(path, metric, title, model="final"):
+    act_path = path + f"analysis/{model}_model/backbone/activations/"
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(16, 9), sharex=True, sharey=True)
     max_val = -np.inf
     for idx, dset in enumerate(["toybox_train", "in12_train"]):
@@ -244,8 +245,8 @@ def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, supe
     # return histogram_fname
 
 
-def plot_and_show_histogram(path, metric, title):
-    hist_fname = gen_intra_domain_dist_histograms(path=path, title=title, metric=metric)
+def plot_and_show_histogram(path, metric, title, model="final"):
+    hist_fname = gen_intra_domain_dist_histograms(path=path, title=title, metric=metric, model=model)
     img = Image.open(hist_fname)
     return img
 
