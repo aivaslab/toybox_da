@@ -52,6 +52,9 @@ def get_parser():
                                                                                      "training")
     parser.add_argument("--track-knn-acc", default=False, action='store_true', help="Use this flag to track "
                                                                                     "within-batch accuracy with knn")
+    parser.add_argument("--separate-forward-pass", default=False, action='store_true', help="Use this flag to have "
+                                                                                            "separate forward passes "
+                                                                                            "for the two datasets")
     return vars(parser.parse_args())
 
 
@@ -73,6 +76,7 @@ def main():
     tb_ssl_loss = exp_args['tb_ssl_loss']
     in12_ssl_loss = exp_args['in12_ssl_loss']
     track_knn_acc = exp_args['track_knn_acc']
+    combined_forward_pass = not exp_args['separate_forward_pass']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
     gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
@@ -134,7 +138,7 @@ def main():
                                     logger=logger, no_save=no_save,
                                     tb_alpha=tb_alpha, in12_alpha=in12_alpha, combined=combined,
                                     tb_ssl_loss=tb_ssl_loss, in12_ssl_loss=in12_ssl_loss,
-                                    track_knn_acc=track_knn_acc)
+                                    track_knn_acc=track_knn_acc, combined_forward_pass=combined_forward_pass)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
                                 momentum=0.9, nesterov=True)

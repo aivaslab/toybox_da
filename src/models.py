@@ -115,7 +115,7 @@ class DualSSLModel:
     """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
 
     def __init__(self, network, src_loader, trgt_loader, logger, no_save, tb_alpha, in12_alpha,
-                 tb_ssl_loss, in12_ssl_loss, combined, track_knn_acc):
+                 tb_ssl_loss, in12_ssl_loss, combined, track_knn_acc, combined_forward_pass):
         self.network = network
         self.src_loader = utils.ForeverDataLoader(src_loader)
         self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
@@ -129,6 +129,7 @@ class DualSSLModel:
         self.in12_ssl_loss = in12_ssl_loss
         self.combined = combined
         self.track_knn_acc = track_knn_acc
+        self.combined_forward_pass = combined_forward_pass
         if self.combined:
             raise NotImplementedError()
 
@@ -136,7 +137,20 @@ class DualSSLModel:
         self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
 
     @staticmethod
+    def get_domain_distance(src_feats, trgt_feats, metric):
+        """Returns the distance matrix between the source features and the target features"""
+        if metric == "cosine":
+            dist = func.cosine_similarity(src_feats.unsqueeze(1), trgt_feats.unsqueeze(0), dim=-1)
+        elif metric == "euclidean":
+            dist = torch.linalg.norm(src_feats.unsqueeze(1) - trgt_feats.unsqueeze(0), dim=-1, ord=2)
+        else:
+            dist = torch.matmul(src_feats, trgt_feats.transpose(0, 1))
+        assert dist.shape == (src_feats.shape[0], trgt_feats.shape[0]), f"{dist.shape}"
+        return torch.mean(dist)
+
+    @staticmethod
     def get_distance(feats, metric):
+        """Return the distance matrix formed by computing the distance between each pair of feature vectors in feats"""
         if metric == "cosine":
             dist = func.cosine_similarity(feats.unsqueeze(1), feats.unsqueeze(0), dim=-1)
         elif metric == "euclidean":
@@ -147,8 +161,11 @@ class DualSSLModel:
         return dist
 
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
-        """Train model"""
+        """Run 1 epoch of training and track batch-specific and epoch-level data"""
+        # Set network in train mode
         self.network.set_train()
+
+        # Initialize tracking variables
         num_batches = 0
         src_loss_total = 0.0
         trgt_loss_total = 0.0
@@ -160,15 +177,28 @@ class DualSSLModel:
         trgt_neg_acc_total = 0.0
         halfway = steps / 2.0
         start_time = time.time()
+
+        # Tracking variables for domain distance
+        cross_domain_cosine_dist_total = 0.0
+        cross_domain_euclidean_dist_total = 0.0
+        tb_cosine_dist_total = 0.0
+        tb_euclidean_dist_total = 0.0
+        in12_cosine_dist_total = 0.0
+        in12_euclidean_dist_total = 0.0
+
         for step in range(1, steps + 1):
             optimizer.zero_grad()
 
+            # Load data for forward pass
             src_idx, src_images, src_labels = self.src_loader.get_next_batch()
             trgt_idx, trgt_images, trgt_labels = self.trgt_loader.get_next_batch()
             src_anchors_len, trgt_anchors_len = len(src_images[0]), len(trgt_images[0])
             src_labels, trgt_labels = src_labels.cuda(), trgt_labels.cuda()
 
             if self.combined:
+                ###################
+                # Not implemented #
+                ###################
                 anchors, positives = torch.cat([src_images[0], trgt_images[0]], dim=0), \
                     torch.cat([src_images[1], trgt_images[1]], dim=0)
 
@@ -182,7 +212,6 @@ class DualSSLModel:
                     loss = criterion(logits, labels)
                 else:
                     concat_src_labels = torch.cat([src_labels for _ in range(4)], dim=0)
-                    # print(src_labels.shape, concat_src_labels.shape)
                     loss = utils.sup_decoupled_contrastive_loss(features=feats, temp=0.1,
                                                                 labels=concat_src_labels)
                 src_loss, trgt_loss = torch.tensor(0.0), torch.tensor(0.0)
@@ -190,14 +219,23 @@ class DualSSLModel:
                 trgt_anchor_feats = feats[src_anchors_len:src_anchors_len + trgt_anchors_len]
             else:
                 src_images, trgt_images = torch.cat(src_images, dim=0), torch.cat(trgt_images, dim=0)
-                images = torch.cat([src_images, trgt_images], dim=0)
-                images = images.cuda()
-                feats = self.network.forward(images)
-                src_size = src_images.shape[0]
-                src_feats, trgt_feats = feats[:src_size], feats[src_size:]
+
+                if self.combined_forward_pass:
+                    # Both src and trgt images have to fed into the network together
+                    images = torch.cat([src_images, trgt_images], dim=0)
+                    images = images.cuda()
+                    feats = self.network.forward(images)
+                    src_size = src_images.shape[0]
+                    src_feats, trgt_feats = feats[:src_size], feats[src_size:]
+                else:
+                    # Feed src and trgt images separately into the network
+                    src_images, trgt_images = src_images.cuda(), trgt_images.cuda()
+                    src_feats = self.network.forward(src_images)
+                    trgt_feats = self.network.forward(trgt_images)
                 src_anchor_feats = src_feats[:src_anchors_len]
                 trgt_anchor_feats = trgt_feats[:trgt_anchors_len]
 
+                # Apply appropriate SSL loss to src features
                 if self.tb_ssl_loss == "simclr":
                     src_logits, src_labels_info_nce = utils.info_nce_loss(features=src_feats, temp=0.5)
                     src_loss = criterion(src_logits, src_labels_info_nce)
@@ -205,10 +243,10 @@ class DualSSLModel:
                     src_loss = utils.decoupled_contrastive_loss(features=src_feats, temp=0.1)
                 else:
                     concat_src_labels = torch.cat([src_labels for _ in range(2)], dim=0)
-                    # print(src_labels.shape, concat_src_labels.shape)
                     src_loss = utils.sup_decoupled_contrastive_loss(features=src_feats, temp=0.1,
                                                                     labels=concat_src_labels)
 
+                # Apply appropriate SSL loss to trgt features
                 if self.in12_ssl_loss == "dcl":
                     trgt_loss = utils.decoupled_contrastive_loss(features=trgt_feats, temp=0.1)
                 else:
@@ -216,31 +254,69 @@ class DualSSLModel:
                     trgt_logits, trgt_labels = utils.info_nce_loss(features=trgt_feats, temp=0.5)
                     trgt_loss = criterion(trgt_logits, trgt_labels)
                 loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss
+
+            # Backprop and update weights
             src_loss_total += src_loss.item()
             trgt_loss_total += trgt_loss.item()
             loss.backward()
-
             optimizer.step()
             if scheduler is not None:
                 scheduler.step()
 
+            # Track average within-domain and cross-domain distances
+            with torch.no_grad():
+                # Calculate cross-domain distances
+                domain_distance_cosine = self.get_domain_distance(src_feats=src_anchor_feats,
+                                                                  trgt_feats=trgt_anchor_feats,
+                                                                  metric="cosine")
+                cross_domain_cosine_dist_total += domain_distance_cosine.item()
+                domain_distance_euclidean = self.get_domain_distance(src_feats=src_anchor_feats,
+                                                                     trgt_feats=trgt_anchor_feats,
+                                                                     metric="euclidean")
+                cross_domain_euclidean_dist_total += domain_distance_euclidean.item()
+
+                # Calculate within-domain distances for Toybox
+                src_dist_mat = self.get_distance(feats=src_anchor_feats, metric="cosine")
+                src_dist_cosine = torch.mean(src_dist_mat)
+                tb_cosine_dist_total += src_dist_cosine.item()
+                src_dist_mat_euclidean = self.get_distance(feats=src_anchor_feats, metric="euclidean")
+                src_dist_euclidean = torch.mean(src_dist_mat_euclidean)
+                tb_euclidean_dist_total += src_dist_euclidean.item()
+
+                # Calculate within-domain distances for IN-12
+                trgt_dist_mat = self.get_distance(feats=trgt_anchor_feats, metric="cosine")
+                trgt_dist_cosine = torch.mean(trgt_dist_mat)
+                in12_cosine_dist_total += trgt_dist_cosine.item()
+                trgt_dist_mat_euclidean = self.get_distance(feats=trgt_anchor_feats, metric="euclidean")
+                trgt_dist_euclidean = torch.mean(trgt_dist_mat_euclidean)
+                in12_euclidean_dist_total += trgt_dist_euclidean.item()
+
             if self.track_knn_acc:
+                # Track within-batch accuracy using KNNs
+                # NOTE: This only considers the anchor images. Positive pairs are not considered for KNN acc.
+                # calculation
                 with torch.no_grad():
-                    src_dist_mat = self.get_distance(feats=src_anchor_feats, metric="cosine")
+                    # Get top-2 closest image and discard closest (this should be the image itself) for src feats
                     _, src_topk_closest_indices = torch.topk(src_dist_mat, k=2, largest=True)
-                    _, src_topk_farthest_indices = torch.topk(src_dist_mat, k=1, largest=False)
                     src_topk_labels = src_labels[src_topk_closest_indices][:, 1]
+
+                    # Get the furthest image for src feats
+                    _, src_topk_farthest_indices = torch.topk(src_dist_mat, k=1, largest=False)
                     src_farthest_labels = src_labels[src_topk_farthest_indices[:, 0]]
 
-                    trgt_dist_mat = self.get_distance(feats=trgt_anchor_feats, metric="cosine")
-                    _, trgt_topk_closest_indices = torch.topk(trgt_dist_mat, k=2, largest=True)
-                    _, trgt_topk_farthest_indices = torch.topk(trgt_dist_mat, k=1, largest=False)
-                    trgt_topk_labels = trgt_labels[trgt_topk_closest_indices][:, 1]
-                    trgt_farthest_labels = trgt_labels[trgt_topk_farthest_indices][:, 0]
-
+                    # Calculate src accuracies
                     src_acc = 100 * torch.sum((src_topk_labels == src_labels).int()).item() / len(src_labels)
                     src_neg_acc = 100 * torch.sum((src_farthest_labels == src_labels).int()).item() / len(src_labels)
 
+                    # Get top-2 closes image and discard closest (this should be the image itself) for trgt feats
+                    _, trgt_topk_closest_indices = torch.topk(trgt_dist_mat, k=2, largest=True)
+                    trgt_topk_labels = trgt_labels[trgt_topk_closest_indices][:, 1]
+
+                    # Get the furthest image for trgt feats
+                    _, trgt_topk_farthest_indices = torch.topk(trgt_dist_mat, k=1, largest=False)
+                    trgt_farthest_labels = trgt_labels[trgt_topk_farthest_indices][:, 0]
+
+                    # Calculate trgt accuracies
                     trgt_acc = 100 * torch.sum((trgt_topk_labels == trgt_labels).int()).item() / len(trgt_labels)
                     trgt_neg_acc = 100 * torch.sum((trgt_farthest_labels == trgt_labels).int()).item() / len(
                         trgt_labels)
@@ -253,7 +329,9 @@ class DualSSLModel:
             ssl_loss_total += loss.item()
             num_batches += 1
 
+            # If model is being saved, save the tracked variables using tensorboard
             if not self.no_save:
+                # Track SSL losses during training
                 if self.combined:
                     scalar_dict = {
                         'ssl_loss_ep': ssl_loss_total / num_batches,
@@ -273,14 +351,44 @@ class DualSSLModel:
                     tag_scalar_dict=scalar_dict,
                     global_step=(ep - 1) * steps + num_batches,
                 )
+
+                # Track the within-domain and cross-domain Euclidean distances during training
+                writer.add_scalars(
+                    main_tag="domain_distance",
+                    tag_scalar_dict={
+                        'euclidean_dist_batch': domain_distance_euclidean.item(),
+                        'euclidean_dist_ep': cross_domain_euclidean_dist_total / num_batches,
+                        'tb_euclidean_dist_batch': src_dist_euclidean.item(),
+                        'tb_euclidean_dist_ep': tb_euclidean_dist_total / num_batches,
+                        'in12_euclidean_dist_batch': trgt_dist_euclidean.item(),
+                        'in12_euclidean_dist_ep': in12_euclidean_dist_total / num_batches,
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+
+                # Track the within-domain and cross-domain cosine similarity during training
+                writer.add_scalars(
+                    main_tag="domain_similarity",
+                    tag_scalar_dict={
+                        'cos_dist_batch': domain_distance_cosine.item(),
+                        'cos_dist_ep': cross_domain_cosine_dist_total / num_batches,
+                        'tb_cos_dist_batch': src_dist_cosine.item(),
+                        'tb_cos_dist_ep': tb_cosine_dist_total / num_batches,
+                        'in12_cos_dist_batch': trgt_dist_cosine.item(),
+                        'in12_cos_dist_ep': in12_cosine_dist_total / num_batches,
+                    },
+                    global_step=(ep - 1) * steps + num_batches,
+                )
+
+                # Track the accuracies from the KNN models
                 if self.track_knn_acc:
                     writer.add_scalars(
                         main_tag="knn_acc",
                         tag_scalar_dict={
                             'src_closest_acc_batch': src_acc,
-                            'src_furthest_acc_batch': src_neg_acc_total,
+                            'src_furthest_acc_batch': src_neg_acc,
                             'trgt_closest_acc_batch': trgt_acc,
-                            'trgt_furthest_acc_batch': trgt_neg_acc_total,
+                            'trgt_furthest_acc_batch': trgt_neg_acc,
                             'src_closest_acc_ep': src_acc_total / num_batches,
                             'src_furthest_acc_ep': src_neg_acc_total / num_batches,
                             'trgt_closest_acc_ep': trgt_acc_total / num_batches,
@@ -288,6 +396,8 @@ class DualSSLModel:
                         },
                         global_step=(ep - 1) * steps + num_batches,
                     )
+
+                # Track the learning rate during training
                 writer.add_scalars(
                     main_tag="training_lr",
                     tag_scalar_dict={
@@ -296,25 +406,33 @@ class DualSSLModel:
                     },
                     global_step=(ep - 1) * steps + num_batches,
                 )
+
+        # Print current state of experimental run using logger
         if self.combined:
             self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  "
-                             "SSL: {:.3f}  A1: {:.2f}  A2: {:.2f}  A3: {:.2f}  A4: {:.2f}  T: {:.2f}s".format(
+                             "SSL: {:.3f}  A1: {:.2f}  A2: {:.2f}  A3: {:.2f}  "
+                             "A4: {:.2f}  cos: {:.2f}  euc: {:.2f}  T: {:.2f}s".format(
                                 ep, ep_total, steps, steps,
                                 optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                                 ssl_loss_total / num_batches,
                                 src_acc_total / num_batches, trgt_acc_total / num_batches,
                                 src_neg_acc_total / num_batches, trgt_neg_acc_total / num_batches,
+                                cross_domain_cosine_dist_total / num_batches,
+                                cross_domain_euclidean_dist_total / num_batches,
                                 time.time() - start_time)
                              )
         else:
             self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
-                             "SSL: {:.3f}  A1: {:.2f}  A2: {:.2f}  A3: {:.2f}  A4: {:.2f}  T: {:.2f}s".format(
+                             "SSL: {:.3f}  A1: {:.2f}  A2: {:.2f}  A3: {:.2f}  A4: {:.2f}  "
+                             "cos: {:.2f}  euc: {:.2f}  T: {:.2f}s".format(
                                 ep, ep_total, steps, steps,
                                 optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
                                 src_loss_total / num_batches, trgt_loss_total / num_batches,
                                 ssl_loss_total / num_batches,
                                 src_acc_total / num_batches, trgt_acc_total / num_batches,
                                 src_neg_acc_total / num_batches, trgt_neg_acc_total / num_batches,
+                                cross_domain_cosine_dist_total / num_batches,
+                                cross_domain_euclidean_dist_total / num_batches,
                                 time.time() - start_time)
                              )
 
