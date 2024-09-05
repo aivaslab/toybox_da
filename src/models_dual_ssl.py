@@ -173,7 +173,7 @@ class DualSSLClassMMDModelV1:
 
     def __init__(self, network, src_loader, trgt_loader, logger, no_save, tb_ssl_loss, in12_ssl_loss,
                  tb_alpha, in12_alpha, div_alpha, ignore_div_loss, asymmetric, use_ot, div_metric,
-                 fixed_div_alpha):
+                 fixed_div_alpha, use_div_on_feats):
         self.network = network
         self.src_loader = utils.ForeverDataLoader(src_loader)
         self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
@@ -191,6 +191,7 @@ class DualSSLClassMMDModelV1:
         self.use_ot = use_ot
         self.div_metric = div_metric
         self.fixed_div_alpha = fixed_div_alpha
+        self.use_div_on_feats = use_div_on_feats
 
         self.emd_dist_loss = mmd_util.EMD1DLoss()
         self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
@@ -282,36 +283,52 @@ class DualSSLClassMMDModelV1:
             if self.ignore_div_loss:
                 loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss
                 with torch.no_grad():
+                    if self.use_div_on_feats:
+                        div_dist_emd_loss = torch.tensor([0.0])
+                        div_dist_mmd_loss = self.mmd_dist_loss((src_feats_stacked,), (trgt_feats_1,))
+                    else:
+                        src_feats_dists = self.get_distance(src_feats_stacked)
+                        if self.asymmetric:
+                            src_feats_dists = torch.reshape(src_feats_dists, (-1, 1)).clone().detach()
+
+                        else:
+                            src_feats_dists = torch.reshape(src_feats_dists, (-1, 1))
+
+                        trgt_feats_dists = self.get_distance(trgt_feats_1)
+                        trgt_feats_dists = torch.reshape(trgt_feats_dists, (-1, 1))
+
+                        div_dist_emd_loss = self.emd_dist_loss(src_feats_dists, trgt_feats_dists)
+                        div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists,), (trgt_feats_dists,))
+            else:
+                if self.use_div_on_feats:
+                    if self.asymmetric:
+                        src_feats_dist = src_feats_stacked.clone().detach()
+                    else:
+                        src_feats_dist = src_feats_stacked
+                    trgt_feats_dist = trgt_feats_1
+                    if self.use_ot:
+                        raise NotImplementedError()
+                    else:
+                        div_dist_emd_loss = torch.tensor([0.])
+                        div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dist,), (trgt_feats_dist,))
+                        loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + div_alpha * div_dist_mmd_loss
+                else:
                     src_feats_dists = self.get_distance(src_feats_stacked)
                     if self.asymmetric:
                         src_feats_dists = torch.reshape(src_feats_dists, (-1, 1)).clone().detach()
-
                     else:
                         src_feats_dists = torch.reshape(src_feats_dists, (-1, 1))
 
                     trgt_feats_dists = self.get_distance(trgt_feats_1)
                     trgt_feats_dists = torch.reshape(trgt_feats_dists, (-1, 1))
-
-                    div_dist_emd_loss = self.emd_dist_loss(src_feats_dists, trgt_feats_dists)
-                    div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists,), (trgt_feats_dists,))
-            else:
-                src_feats_dists = self.get_distance(src_feats_stacked)
-                if self.asymmetric:
-                    src_feats_dists = torch.reshape(src_feats_dists, (-1, 1)).clone().detach()
-
-                else:
-                    src_feats_dists = torch.reshape(src_feats_dists, (-1, 1))
-
-                trgt_feats_dists = self.get_distance(trgt_feats_1)
-                trgt_feats_dists = torch.reshape(trgt_feats_dists, (-1, 1))
-                if self.use_ot:
-                    div_dist_emd_loss = self.emd_dist_loss(src_feats_dists, trgt_feats_dists)
-                    div_dist_mmd_loss = torch.tensor([0.])
-                    loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + div_alpha * div_dist_emd_loss
-                else:
-                    div_dist_emd_loss = torch.tensor([0.])
-                    div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists, ), (trgt_feats_dists, ))
-                    loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + div_alpha * div_dist_mmd_loss
+                    if self.use_ot:
+                        div_dist_emd_loss = self.emd_dist_loss(src_feats_dists, trgt_feats_dists)
+                        div_dist_mmd_loss = torch.tensor([0.])
+                        loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + div_alpha * div_dist_emd_loss
+                    else:
+                        div_dist_emd_loss = torch.tensor([0.])
+                        div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists, ), (trgt_feats_dists, ))
+                        loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + div_alpha * div_dist_mmd_loss
 
             src_loss_total += src_loss.item()
             trgt_loss_total += trgt_loss.item()
