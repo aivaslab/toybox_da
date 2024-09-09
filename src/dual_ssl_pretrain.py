@@ -55,6 +55,8 @@ def get_parser():
     parser.add_argument("--separate-forward-pass", default=False, action='store_true', help="Use this flag to have "
                                                                                             "separate forward passes "
                                                                                             "for the two datasets")
+    parser.add_argument("--queue-factor", "-qf", default=1, type=int, help="Set the size of the knn queue wrt the "
+                                                                           "batch size")
     return vars(parser.parse_args())
 
 
@@ -65,6 +67,7 @@ def main():
     num_epochs = exp_args['epochs']
     workers = exp_args['workers']
     no_save = exp_args['no_save']
+    b_size = exp_args['bsize']
     save_dir = exp_args['save_dir']
     tb_alpha = exp_args['tb_alpha']
     in12_alpha = exp_args['in12_alpha']
@@ -77,6 +80,7 @@ def main():
     in12_ssl_loss = exp_args['in12_ssl_loss']
     track_knn_acc = exp_args['track_knn_acc']
     combined_forward_pass = not exp_args['separate_forward_pass']
+    queue_factor = exp_args['queue_factor']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
     gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
@@ -96,7 +100,7 @@ def main():
                                                              hypertune=hypertune)
     else:
         in12_data_train = datasets.IN12SSLWithLabels(transform=in12_transform_train, hypertune=hypertune)
-    in12_loader_train = torchdata.DataLoader(in12_data_train, batch_size=exp_args['bsize'], shuffle=True,
+    in12_loader_train = torchdata.DataLoader(in12_data_train, batch_size=b_size, shuffle=True,
                                              num_workers=workers, pin_memory=True, persistent_workers=True,
                                              drop_last=True)
 
@@ -111,7 +115,7 @@ def main():
                                             transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)])
     tb_data_train = datasets.ToyboxDatasetSSL(rng=np.random.default_rng(0), transform=tb_transform_train,
                                               fraction=1.0, hypertune=hypertune, distort=tb_ssl_type)
-    tb_loader_train = torchdata.DataLoader(tb_data_train, batch_size=exp_args['bsize'], shuffle=True,
+    tb_loader_train = torchdata.DataLoader(tb_data_train, batch_size=b_size, shuffle=True,
                                            num_workers=workers, pin_memory=True, persistent_workers=True,
                                            drop_last=True)
 
@@ -138,7 +142,8 @@ def main():
                                     logger=logger, no_save=no_save,
                                     tb_alpha=tb_alpha, in12_alpha=in12_alpha, combined=combined,
                                     tb_ssl_loss=tb_ssl_loss, in12_ssl_loss=in12_ssl_loss,
-                                    track_knn_acc=track_knn_acc, combined_forward_pass=combined_forward_pass)
+                                    track_knn_acc=track_knn_acc, combined_forward_pass=combined_forward_pass,
+                                    queue_size=queue_factor*b_size)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
                                 momentum=0.9, nesterov=True)

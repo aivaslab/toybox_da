@@ -115,7 +115,7 @@ class DualSSLModel:
     """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
 
     def __init__(self, network, src_loader, trgt_loader, logger, no_save, tb_alpha, in12_alpha,
-                 tb_ssl_loss, in12_ssl_loss, combined, track_knn_acc, combined_forward_pass):
+                 tb_ssl_loss, in12_ssl_loss, combined, track_knn_acc, combined_forward_pass, queue_size):
         self.network = network
         self.src_loader = utils.ForeverDataLoader(src_loader)
         self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
@@ -130,6 +130,11 @@ class DualSSLModel:
         self.combined = combined
         self.track_knn_acc = track_knn_acc
         self.combined_forward_pass = combined_forward_pass
+        self.queue_size = queue_size
+        self.tb_feats_queue = None
+        self.tb_labels_queue = None
+        self.in12_feats_queue = None
+        self.in12_labels_queue = None
         if self.combined:
             raise NotImplementedError()
 
@@ -137,7 +142,7 @@ class DualSSLModel:
         self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
 
     @staticmethod
-    def get_domain_distance(src_feats, trgt_feats, metric):
+    def get_paired_distance(src_feats, trgt_feats, metric):
         """Returns the distance matrix between the source features and the target features"""
         if metric == "cosine":
             dist = func.cosine_similarity(src_feats.unsqueeze(1), trgt_feats.unsqueeze(0), dim=-1)
@@ -146,7 +151,7 @@ class DualSSLModel:
         else:
             dist = torch.matmul(src_feats, trgt_feats.transpose(0, 1))
         assert dist.shape == (src_feats.shape[0], trgt_feats.shape[0]), f"{dist.shape}"
-        return torch.mean(dist)
+        return dist
 
     @staticmethod
     def get_distance(feats, metric):
@@ -266,13 +271,13 @@ class DualSSLModel:
             # Track average within-domain and cross-domain distances
             with torch.no_grad():
                 # Calculate cross-domain distances
-                domain_distance_cosine = self.get_domain_distance(src_feats=src_anchor_feats,
-                                                                  trgt_feats=trgt_anchor_feats,
-                                                                  metric="cosine")
+                domain_distance_cosine = torch.mean(self.get_paired_distance(src_feats=src_anchor_feats,
+                                                                             trgt_feats=trgt_anchor_feats,
+                                                                             metric="cosine"))
                 cross_domain_cosine_dist_total += domain_distance_cosine.item()
-                domain_distance_euclidean = self.get_domain_distance(src_feats=src_anchor_feats,
-                                                                     trgt_feats=trgt_anchor_feats,
-                                                                     metric="euclidean")
+                domain_distance_euclidean = torch.mean(self.get_paired_distance(src_feats=src_anchor_feats,
+                                                                                trgt_feats=trgt_anchor_feats,
+                                                                                metric="euclidean"))
                 cross_domain_euclidean_dist_total += domain_distance_euclidean.item()
 
                 # Calculate within-domain distances for Toybox
@@ -296,25 +301,48 @@ class DualSSLModel:
                 # NOTE: This only considers the anchor images. Positive pairs are not considered for KNN acc.
                 # calculation
                 with torch.no_grad():
+                    if self.tb_feats_queue is None:
+                        self.tb_feats_queue = src_anchor_feats
+                        self.tb_labels_queue = src_labels
+                        self.in12_feats_queue = trgt_anchor_feats
+                        self.in12_labels_queue = trgt_labels
+                    else:
+                        self.tb_feats_queue = torch.cat((self.tb_feats_queue, src_anchor_feats))[-self.queue_size:, :]
+                        self.tb_labels_queue = torch.cat((self.tb_labels_queue, src_labels))[-self.queue_size:]
+                        self.in12_feats_queue = torch.cat((self.in12_feats_queue, trgt_anchor_feats))[
+                                                -self.queue_size:, :]
+                        self.in12_labels_queue = torch.cat((self.in12_labels_queue, trgt_labels))[-self.queue_size:]
+                    # print(self.tb_feats_queue.shape, self.in12_feats_queue.shape, self.tb_labels_queue.shape,
+                    #       self.in12_labels_queue.shape)
+
+                    # src_dist_mat = self.get_distance(feats=src_anchor_feats, metric="cosine")
+                    src_dist_mat = self.get_paired_distance(src_feats=src_anchor_feats,
+                                                            trgt_feats=self.tb_feats_queue,
+                                                            metric="cosine")
+                    # print(src_dist_mat.shape)
                     # Get top-2 closest image and discard closest (this should be the image itself) for src feats
                     _, src_topk_closest_indices = torch.topk(src_dist_mat, k=2, largest=True)
-                    src_topk_labels = src_labels[src_topk_closest_indices][:, 1]
+                    src_topk_labels = self.tb_labels_queue[src_topk_closest_indices][:, 1]
 
                     # Get the furthest image for src feats
                     _, src_topk_farthest_indices = torch.topk(src_dist_mat, k=1, largest=False)
-                    src_farthest_labels = src_labels[src_topk_farthest_indices[:, 0]]
+                    src_farthest_labels = self.tb_labels_queue[src_topk_farthest_indices[:, 0]]
 
                     # Calculate src accuracies
                     src_acc = 100 * torch.sum((src_topk_labels == src_labels).int()).item() / len(src_labels)
                     src_neg_acc = 100 * torch.sum((src_farthest_labels == src_labels).int()).item() / len(src_labels)
 
+                    # trgt_dist_mat = self.get_distance(feats=trgt_anchor_feats, metric="cosine")
+                    trgt_dist_mat = self.get_paired_distance(src_feats=trgt_anchor_feats,
+                                                             trgt_feats=self.in12_feats_queue,
+                                                             metric="cosine")
                     # Get top-2 closes image and discard closest (this should be the image itself) for trgt feats
                     _, trgt_topk_closest_indices = torch.topk(trgt_dist_mat, k=2, largest=True)
-                    trgt_topk_labels = trgt_labels[trgt_topk_closest_indices][:, 1]
+                    trgt_topk_labels = self.in12_labels_queue[trgt_topk_closest_indices][:, 1]
 
                     # Get the furthest image for trgt feats
                     _, trgt_topk_farthest_indices = torch.topk(trgt_dist_mat, k=1, largest=False)
-                    trgt_farthest_labels = trgt_labels[trgt_topk_farthest_indices][:, 0]
+                    trgt_farthest_labels = self.in12_labels_queue[trgt_topk_farthest_indices][:, 0]
 
                     # Calculate trgt accuracies
                     trgt_acc = 100 * torch.sum((trgt_topk_labels == trgt_labels).int()).item() / len(trgt_labels)
@@ -412,29 +440,29 @@ class DualSSLModel:
             self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  "
                              "SSL: {:.3f}  A1: {:.2f}  A2: {:.2f}  A3: {:.2f}  "
                              "A4: {:.2f}  cos: {:.2f}  euc: {:.2f}  T: {:.2f}s".format(
-                                ep, ep_total, steps, steps,
-                                optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
-                                ssl_loss_total / num_batches,
-                                src_acc_total / num_batches, trgt_acc_total / num_batches,
-                                src_neg_acc_total / num_batches, trgt_neg_acc_total / num_batches,
-                                cross_domain_cosine_dist_total / num_batches,
-                                cross_domain_euclidean_dist_total / num_batches,
-                                time.time() - start_time)
-                             )
+                ep, ep_total, steps, steps,
+                optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                ssl_loss_total / num_batches,
+                src_acc_total / num_batches, trgt_acc_total / num_batches,
+                src_neg_acc_total / num_batches, trgt_neg_acc_total / num_batches,
+                cross_domain_cosine_dist_total / num_batches,
+                cross_domain_euclidean_dist_total / num_batches,
+                time.time() - start_time)
+            )
         else:
             self.logger.info("Ep: {}/{}  Step: {}/{}  BLR: {:.3f}  SLR: {:.3f}  SSL1: {:.3f}  SSL2: {:.3f}  "
                              "SSL: {:.3f}  A1: {:.2f}  A2: {:.2f}  A3: {:.2f}  A4: {:.2f}  "
                              "cos: {:.2f}  euc: {:.2f}  T: {:.2f}s".format(
-                                ep, ep_total, steps, steps,
-                                optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
-                                src_loss_total / num_batches, trgt_loss_total / num_batches,
-                                ssl_loss_total / num_batches,
-                                src_acc_total / num_batches, trgt_acc_total / num_batches,
-                                src_neg_acc_total / num_batches, trgt_neg_acc_total / num_batches,
-                                cross_domain_cosine_dist_total / num_batches,
-                                cross_domain_euclidean_dist_total / num_batches,
-                                time.time() - start_time)
-                             )
+                ep, ep_total, steps, steps,
+                optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr'],
+                src_loss_total / num_batches, trgt_loss_total / num_batches,
+                ssl_loss_total / num_batches,
+                src_acc_total / num_batches, trgt_acc_total / num_batches,
+                src_neg_acc_total / num_batches, trgt_neg_acc_total / num_batches,
+                cross_domain_cosine_dist_total / num_batches,
+                cross_domain_euclidean_dist_total / num_batches,
+                time.time() - start_time)
+            )
 
 
 class SSLModel:
