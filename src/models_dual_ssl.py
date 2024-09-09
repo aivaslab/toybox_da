@@ -173,7 +173,7 @@ class DualSSLClassMMDModelV1:
 
     def __init__(self, network, src_loader, trgt_loader, logger, no_save, tb_ssl_loss, in12_ssl_loss,
                  tb_alpha, in12_alpha, div_alpha, ignore_div_loss, asymmetric, use_ot, div_metric,
-                 fixed_div_alpha, use_div_on_feats):
+                 fixed_div_alpha, use_div_on_feats, combined_fwd_pass):
         self.network = network
         self.src_loader = utils.ForeverDataLoader(src_loader)
         self.trgt_loader = utils.ForeverDataLoader(trgt_loader)
@@ -192,6 +192,7 @@ class DualSSLClassMMDModelV1:
         self.div_metric = div_metric
         self.fixed_div_alpha = fixed_div_alpha
         self.use_div_on_feats = use_div_on_feats
+        self.combined_fwd_pass = combined_fwd_pass
 
         self.emd_dist_loss = mmd_util.EMD1DLoss()
         self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
@@ -250,11 +251,16 @@ class DualSSLClassMMDModelV1:
             trgt_anchors, trgt_positives = trgt_images[0], trgt_images[1]
             trgt_batch = torch.cat([trgt_anchors, trgt_positives], dim=0)
 
-            images = torch.cat([src_batch, trgt_batch], dim=0)
-            images = images.cuda()
-            feats = self.network.forward(images)
-            src_size = src_batch.shape[0]
-            src_feats, trgt_feats = feats[:src_size], feats[src_size:]
+            if self.combined_fwd_pass:
+                images = torch.cat([src_batch, trgt_batch], dim=0)
+                images = images.cuda()
+                feats = self.network.forward(images)
+                src_size = src_batch.shape[0]
+                src_feats, trgt_feats = feats[:src_size], feats[src_size:]
+            else:
+                src_batch, trgt_batch = src_batch.cuda(), trgt_batch.cuda()
+                src_feats = self.network.forward(src_batch)
+                trgt_feats = self.network.forward(trgt_batch)
             # print(src_feats.shape, trgt_feats.shape)
             if self.tb_ssl_loss == "simclr":
                 src_logits, src_labels_info_nce = utils.info_nce_loss(features=src_feats, temp=0.5)

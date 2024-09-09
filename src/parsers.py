@@ -79,5 +79,8 @@ def get_dual_ssl_class_mmd_v1_parser():
     parser.add_argument("--use-div-on-features", default=False, action='store_true', help="Use this flag to run the "
                                                                                           "MMD loss on features "
                                                                                           "directly")
+    parser.add_argument("--separate-forward-pass", default=False, action='store_true', help="Use this flag to have "
+                                                                                            "separate forward passes "
+                                                                                            "for the two datasets")
 
     return parser
