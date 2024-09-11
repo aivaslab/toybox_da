@@ -73,6 +73,8 @@ def run_training(exp_args):
     div_metric = exp_args['div_metric']
     use_div_on_feats = exp_args['use_div_on_features']
     combined_forward_pass = not exp_args['separate_forward_pass']
+    track_knn_acc = exp_args['track_knn_acc']
+    queue_factor = exp_args['queue_factor']
 
     tb_transform_train = tb_in12_transforms.get_ssl_transform(dset="toybox")
     tb_loader_train = get_dataloader(dset="toybox", batch_size=b_size, ssl_type=tb_ssl_type,
@@ -110,7 +112,8 @@ def run_training(exp_args):
                                                        div_alpha=div_alpha, ignore_div_loss=ignore_div_loss,
                                                        asymmetric=asymmetric, use_ot=use_ot, div_metric=div_metric,
                                                        fixed_div_alpha=True, use_div_on_feats=use_div_on_feats,
-                                                       combined_fwd_pass=combined_forward_pass)
+                                                       combined_fwd_pass=combined_forward_pass,
+                                                       track_knn_acc=track_knn_acc, queue_size=queue_factor*b_size)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
                                 momentum=0.9, nesterov=True)

@@ -82,5 +82,9 @@ def get_dual_ssl_class_mmd_v1_parser():
     parser.add_argument("--separate-forward-pass", default=False, action='store_true', help="Use this flag to have "
                                                                                             "separate forward passes "
                                                                                             "for the two datasets")
+    parser.add_argument("--track-knn-acc", default=False, action='store_true', help="Use this flag to track "
+                                                                                    "within-batch accuracy with knn")
+    parser.add_argument("--queue-factor", "-qf", default=1, type=int, help="Set the size of the knn queue wrt the "
+                                                                           "batch size")
 
     return parser
