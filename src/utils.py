@@ -26,11 +26,11 @@ LOG_FORMAT_FILE = '%(asctime)s:%(filename)s:%(lineno)s:%(levelname)s:%(message)s
 def create_logger(log_level_str: str, log_file_name: str, no_save: bool = False):
     """Create and return logger"""
     log_level = getattr(logging, log_level_str.upper())
-    logging.basicConfig(format=LOG_FORMAT_TERMINAL, level=log_level)
+    logging.basicConfig(format=LOG_FORMAT_TERMINAL, level=log_level, datefmt='%Y-%m-%d %H:%M')
     logger = logging.getLogger(__name__)
     if not no_save:
         logfile_handler = logging.FileHandler(log_file_name)
-        logging_formatter = logging.Formatter(LOG_FORMAT_FILE)
+        logging_formatter = logging.Formatter(fmt=LOG_FORMAT_FILE, datefmt='%Y-%m-%d %H:%M')
         logfile_handler.setFormatter(logging_formatter)
         logger.addHandler(logfile_handler)
     return logger
