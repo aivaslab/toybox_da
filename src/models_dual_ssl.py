@@ -269,6 +269,8 @@ class DualSSLClassMMDModelV1:
         trgt_acc_total = 0.0
         trgt_neg_acc_total = 0.0
         for step in range(1, steps + 1):
+            logger_strs = [f"E:{ep}/{ep_total} b:{step}/{steps} LR:{optimizer.param_groups[0]['lr']:.3f}"]
+            num_batches += 1
             optimizer.zero_grad()
 
             src_idx, src_images, src_labels = self.src_loader.get_next_batch()
@@ -311,6 +313,9 @@ class DualSSLClassMMDModelV1:
             else:
                 trgt_logits, trgt_labels = utils.info_nce_loss(features=trgt_feats, temp=0.5)
                 trgt_loss = criterion(trgt_logits, trgt_labels)
+            src_loss_total += src_loss.item()
+            trgt_loss_total += trgt_loss.item()
+            logger_strs.append(f"SSL1:{src_loss_total / num_batches:.3f} SSL2:{trgt_loss_total / num_batches:.3f}")
 
             num_images_src = len(src_images[0])
             src_feats_1, src_feats_2 = src_feats[:num_images_src], src_feats[num_images_src:2 * num_images_src],
@@ -428,17 +433,18 @@ class DualSSLClassMMDModelV1:
                         closest_div_loss_mmd_total += closest_div_dist_mmd_loss.item()
                         farthest_div_loss_mmd_total += farthest_div_dist_mmd_loss.item()
 
-            src_loss_total += src_loss.item()
-            trgt_loss_total += trgt_loss.item()
-
             loss.backward()
-
             optimizer.step()
             if scheduler is not None:
                 scheduler.step()
 
             ssl_loss_total += loss.item()
-            num_batches += 1
+
+            logger_strs.append(f"alf:{div_alpha:2.1e} EMD1:{closest_div_loss_emd_total / num_batches:.3f} "
+                               f"EMD2:{farthest_div_loss_emd_total / num_batches:.3f} "
+                               f"MMD1:{closest_div_loss_mmd_total / num_batches:.3f} "
+                               f"MMD2:{farthest_div_loss_mmd_total / num_batches:.3f} "
+                               f"Loss:{ssl_loss_total / num_batches:.3f}")
 
             if self.track_knn_acc:
                 # Track within-batch accuracy using KNNs
@@ -508,25 +514,17 @@ class DualSSLClassMMDModelV1:
                     src_neg_acc_total += src_neg_acc
                     trgt_acc_total += trgt_acc
                     trgt_neg_acc_total += trgt_neg_acc
+            logger_strs.append(f"A1:{src_acc_total/num_batches:.2f} A2:{trgt_acc_total/num_batches:.2f} "
+                               f"A3:{src_neg_acc_total/num_batches:.2f} A4:{trgt_neg_acc_total/num_batches:.2f} "
+                               f"D:[{closest_src_dist_total / num_batches:.2f} "
+                               f"{farthest_src_dist_total / num_batches:.2f} "
+                               f"{closest_trgt_dist_total / num_batches:.2f} "
+                               f"{farthest_trgt_dist_total / num_batches:.2f}]")
             assert optimizer.param_groups[1]['lr'] == optimizer.param_groups[0]['lr']
-            if 0 <= step - halfway < 1:
-                self.logger.info("E:{}/{} b:{}/{} LR:{:.3f} SSL1:{:.3f} SSL2:{:.3f} "
-                                 "alf:{:2.1e} EMD1:{:.3f} EMD2:{:.3f} MMD1:{:.3f} MMD2:{:.3f} "
-                                 "Loss:{:.3f} A1:{:.2f} A2:{:.2f} A3:{:.2f} A4:{:.2f} "
-                                 "D:[{:.2f} {:.2f} {:.2f} {:.2f}] T:{:.0f}s".format(
-                                    ep, ep_total, step, steps,
-                                    optimizer.param_groups[0]['lr'],
-                                    src_loss_total / num_batches, trgt_loss_total / num_batches,
-                                    div_alpha,
-                                    closest_div_loss_emd_total / num_batches, farthest_div_loss_emd_total / num_batches,
-                                    closest_div_loss_mmd_total / num_batches, farthest_div_loss_mmd_total / num_batches,
-                                    ssl_loss_total / num_batches,
-                                    src_acc_total / num_batches, trgt_acc_total / num_batches,
-                                    src_neg_acc_total / num_batches, trgt_neg_acc_total / num_batches,
-                                    closest_src_dist_total / num_batches, farthest_src_dist_total / num_batches,
-                                    closest_trgt_dist_total / num_batches, farthest_trgt_dist_total / num_batches,
-                                    round(time.time() - start_time), 0)
-                                 )
+            if 0 <= step - halfway < 1 or step == steps:
+                logger_strs.append(f"T:{time.time() - start_time:.0f}s")
+                logger_str = " ".join(logger_strs)
+                self.logger.info(logger_str)
 
             if not self.no_save:
                 scalar_dict = {
@@ -576,21 +574,3 @@ class DualSSLClassMMDModelV1:
                     },
                     global_step=(ep - 1) * steps + num_batches,
                 )
-        div_alpha = self.get_div_alpha(steps=steps, step=steps, ep=ep, ep_total=ep_total)
-        self.logger.info("E:{}/{} b:{}/{} LR:{:.3f} SSL1:{:.3f} SSL2:{:.3f} "
-                         "alf:{:2.1e} EMD1:{:.3f} EMD2:{:.3f} MMD1:{:.3f} MMD2:{:.3f} Loss:{:.3f} "
-                         "A1:{:.2f} A2:{:.2f} A3:{:.2f} A4:{:.2f} "
-                         "D:[{:.2f} {:.2f} {:.2f} {:.2f}] T:{:.0f}s".format(
-                            ep, ep_total, steps, steps,
-                            optimizer.param_groups[0]['lr'],
-                            src_loss_total / num_batches, trgt_loss_total / num_batches,
-                            div_alpha,
-                            closest_div_loss_emd_total / num_batches, farthest_div_loss_emd_total / num_batches,
-                            closest_div_loss_mmd_total / num_batches, farthest_div_loss_mmd_total / num_batches,
-                            ssl_loss_total / num_batches,
-                            src_acc_total / num_batches, trgt_acc_total / num_batches,
-                            src_neg_acc_total / num_batches, trgt_neg_acc_total / num_batches,
-                            closest_src_dist_total / num_batches, farthest_src_dist_total / num_batches,
-                            closest_trgt_dist_total / num_batches, farthest_trgt_dist_total / num_batches,
-                            time.time() - start_time)
-                         )
