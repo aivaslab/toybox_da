@@ -1,6 +1,7 @@
 
 import time
 import numpy as np
+from collections import defaultdict
 
 import torch
 import torch.nn as nn
@@ -270,6 +271,11 @@ class DualSSLClassMMDModelV1:
         trgt_neg_acc_total = 0.0
         for step in range(1, steps + 1):
             logger_strs = [f"E:{ep}/{ep_total} b:{step}/{steps} LR:{optimizer.param_groups[0]['lr']:.3f}"]
+            tb_scalar_dicts = defaultdict(dict)
+            tb_scalar_dicts["training_lr"] = {
+                'bb': optimizer.param_groups[0]['lr'],
+                'ssl_head': optimizer.param_groups[1]['lr'],
+            }
             num_batches += 1
             optimizer.zero_grad()
 
@@ -445,6 +451,22 @@ class DualSSLClassMMDModelV1:
                                f"MMD1:{closest_div_loss_mmd_total / num_batches:.3f} "
                                f"MMD2:{farthest_div_loss_mmd_total / num_batches:.3f} "
                                f"Loss:{ssl_loss_total / num_batches:.3f}")
+            tb_scalar_dicts["training_loss"] = {
+                'src_ssl_loss_ep': src_loss_total / num_batches,
+                'src_ssl_loss_batch': src_loss.item(),
+                'trgt_ssl_loss_ep': trgt_loss_total / num_batches,
+                'trgt_ssl_loss_batch': trgt_loss.item(),
+                'closest_div_loss_emd_ep': closest_div_loss_emd_total / num_batches,
+                # 'closest_div_loss_emd_batch': div_dist_emd_loss.item(),
+                'closest_div_loss_mmd_ep': closest_div_loss_mmd_total / num_batches,
+                # 'closest_div_loss_mmd_batch': div_dist_mmd_loss.item(),
+                'farthest_div_loss_emd_ep': farthest_div_loss_emd_total / num_batches,
+                'farthest_div_loss_emd_batch': div_dist_emd_loss.item(),
+                'farthest_div_loss_mmd_ep': farthest_div_loss_mmd_total / num_batches,
+                'farthest_div_loss_mmd_batch': div_dist_mmd_loss.item(),
+                'ssl_loss_ep': ssl_loss_total / num_batches,
+                'ssl_loss_batch': loss.item(),
+            }
 
             if self.track_knn_acc:
                 # Track within-batch accuracy using KNNs
@@ -514,12 +536,24 @@ class DualSSLClassMMDModelV1:
                     src_neg_acc_total += src_neg_acc
                     trgt_acc_total += trgt_acc
                     trgt_neg_acc_total += trgt_neg_acc
-            logger_strs.append(f"A1:{src_acc_total/num_batches:.2f} A2:{trgt_acc_total/num_batches:.2f} "
-                               f"A3:{src_neg_acc_total/num_batches:.2f} A4:{trgt_neg_acc_total/num_batches:.2f} "
-                               f"D:[{closest_src_dist_total / num_batches:.2f} "
-                               f"{farthest_src_dist_total / num_batches:.2f} "
-                               f"{closest_trgt_dist_total / num_batches:.2f} "
-                               f"{farthest_trgt_dist_total / num_batches:.2f}]")
+                logger_strs.append(f"A1:{src_acc_total/num_batches:.2f} A2:{trgt_acc_total/num_batches:.2f} "
+                                   f"A3:{src_neg_acc_total/num_batches:.2f} A4:{trgt_neg_acc_total/num_batches:.2f} "
+                                   f"D:[{closest_src_dist_total / num_batches:.2f} "
+                                   f"{farthest_src_dist_total / num_batches:.2f} "
+                                   f"{closest_trgt_dist_total / num_batches:.2f} "
+                                   f"{farthest_trgt_dist_total / num_batches:.2f}]")
+                tb_scalar_dicts["knn_acc"] = {
+                    'tb_queue_size': len(self.tb_labels_queue),
+                    'in12_queue_size': len(self.in12_labels_queue),
+                    'src_closest_acc_batch': src_acc,
+                    'src_furthest_acc_batch': src_neg_acc,
+                    'trgt_closest_acc_batch': trgt_acc,
+                    'trgt_furthest_acc_batch': trgt_neg_acc,
+                    'src_closest_acc_ep': src_acc_total / num_batches,
+                    'src_furthest_acc_ep': src_neg_acc_total / num_batches,
+                    'trgt_closest_acc_ep': trgt_acc_total / num_batches,
+                    'trgt_furthest_acc_ep': trgt_neg_acc_total / num_batches
+                }
             assert optimizer.param_groups[1]['lr'] == optimizer.param_groups[0]['lr']
             if 0 <= step - halfway < 1 or step == steps:
                 logger_strs.append(f"T:{time.time() - start_time:.0f}s")
@@ -527,50 +561,9 @@ class DualSSLClassMMDModelV1:
                 self.logger.info(logger_str)
 
             if not self.no_save:
-                scalar_dict = {
-                        'src_ssl_loss_ep': src_loss_total / num_batches,
-                        'src_ssl_loss_batch': src_loss.item(),
-                        'trgt_ssl_loss_ep': trgt_loss_total / num_batches,
-                        'trgt_ssl_loss_batch': trgt_loss.item(),
-                        'closest_div_loss_emd_ep': closest_div_loss_emd_total / num_batches,
-                        # 'closest_div_loss_emd_batch': div_dist_emd_loss.item(),
-                        'closest_div_loss_mmd_ep': closest_div_loss_mmd_total / num_batches,
-                        # 'closest_div_loss_mmd_batch': div_dist_mmd_loss.item(),
-                        'farthest_div_loss_emd_ep': farthest_div_loss_emd_total / num_batches,
-                        'farthest_div_loss_emd_batch': div_dist_emd_loss.item(),
-                        'farthest_div_loss_mmd_ep': farthest_div_loss_mmd_total / num_batches,
-                        'farthest_div_loss_mmd_batch': div_dist_mmd_loss.item(),
-                        'ssl_loss_ep': ssl_loss_total / num_batches,
-                        'ssl_loss_batch': loss.item(),
-                    }
-                writer.add_scalars(
-                    main_tag="training_loss",
-                    tag_scalar_dict=scalar_dict,
-                    global_step=(ep - 1) * steps + num_batches,
-                )
-                # Track the accuracies from the KNN models
-                if self.track_knn_acc:
+                for key, val_dict in tb_scalar_dicts.items():
                     writer.add_scalars(
-                        main_tag="knn_acc",
-                        tag_scalar_dict={
-                            'tb_queue_size': len(self.tb_labels_queue),
-                            'in12_queue_size': len(self.in12_labels_queue),
-                            'src_closest_acc_batch': src_acc,
-                            'src_furthest_acc_batch': src_neg_acc,
-                            'trgt_closest_acc_batch': trgt_acc,
-                            'trgt_furthest_acc_batch': trgt_neg_acc,
-                            'src_closest_acc_ep': src_acc_total / num_batches,
-                            'src_furthest_acc_ep': src_neg_acc_total / num_batches,
-                            'trgt_closest_acc_ep': trgt_acc_total / num_batches,
-                            'trgt_furthest_acc_ep': trgt_neg_acc_total / num_batches
-                        },
-                        global_step=(ep - 1) * steps + num_batches,
+                        main_tag=key,
+                        tag_scalar_dict=val_dict,
+                        global_step=(ep - 1) * steps + num_batches
                     )
-                writer.add_scalars(
-                    main_tag="training_lr",
-                    tag_scalar_dict={
-                        'bb': optimizer.param_groups[0]['lr'],
-                        'ssl_head': optimizer.param_groups[1]['lr'],
-                    },
-                    global_step=(ep - 1) * steps + num_batches,
-                )
