@@ -76,9 +76,6 @@ def get_dual_ssl_class_mmd_v1_parser():
     parser.add_argument("--use-ot", default=False, action='store_true', help="Use this flag to use OT-based loss "
                                                                              "instead of MMD")
     parser.add_argument("--div-metric", choices=["euclidean", "cosine", "dot"], default="cosine")
-    parser.add_argument("--use-div-on-features", default=False, action='store_true', help="Use this flag to run the "
-                                                                                          "MMD loss on features "
-                                                                                          "directly")
     parser.add_argument("--separate-forward-pass", default=False, action='store_true', help="Use this flag to have "
                                                                                             "separate forward passes "
                                                                                             "for the two datasets")
@@ -86,5 +83,9 @@ def get_dual_ssl_class_mmd_v1_parser():
                                                                                     "within-batch accuracy with knn")
     parser.add_argument("--queue-factor", "-qf", default=1, type=int, help="Set the size of the knn queue wrt the "
                                                                            "batch size")
+    parser.add_argument("--split-div-loss", default=False, action='store_true', help="Use this flag to compute div "
+                                                                                     "loss using closest and farthest "
+                                                                                     "distances instead of all "
+                                                                                     "distances")
 
     return parser

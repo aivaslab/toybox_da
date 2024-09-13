@@ -71,10 +71,10 @@ def run_training(exp_args):
     asymmetric = exp_args['asymmetric']
     use_ot = exp_args['use_ot']
     div_metric = exp_args['div_metric']
-    use_div_on_feats = exp_args['use_div_on_features']
     combined_forward_pass = not exp_args['separate_forward_pass']
     track_knn_acc = exp_args['track_knn_acc']
     queue_factor = exp_args['queue_factor']
+    split_div_loss = exp_args['split_div_loss']
 
     tb_transform_train = tb_in12_transforms.get_ssl_transform(dset="toybox")
     tb_loader_train = get_dataloader(dset="toybox", batch_size=b_size, ssl_type=tb_ssl_type,
@@ -104,16 +104,23 @@ def run_training(exp_args):
         net = networks.ResNet18SSL(backbone_weights=bb_wts, ssl_weights=ssl_wts)
     else:
         net = networks.ResNet18SSL()
-    ssl_model = models_dual_ssl.DualSSLClassMMDModelV1(network=net,
-                                                       src_loader=tb_loader_train, trgt_loader=in12_loader_train,
-                                                       logger=logger, no_save=no_save,
-                                                       tb_ssl_loss=tb_ssl_loss, in12_ssl_loss=in12_ssl_loss,
-                                                       tb_alpha=tb_alpha, in12_alpha=in12_alpha,
-                                                       div_alpha=div_alpha, ignore_div_loss=ignore_div_loss,
-                                                       asymmetric=asymmetric, use_ot=use_ot, div_metric=div_metric,
-                                                       fixed_div_alpha=True, use_div_on_feats=use_div_on_feats,
-                                                       combined_fwd_pass=combined_forward_pass,
-                                                       track_knn_acc=track_knn_acc, queue_size=queue_factor*b_size)
+
+    if ignore_div_loss:
+        if split_div_loss:
+            model_name = models_dual_ssl.DualSSLWithinDomainSplitDistMatchingModelBase
+        else:
+            model_name = models_dual_ssl.DualSSLWithinDomainDistMatchingModelBase
+    else:
+        if split_div_loss:
+            model_name = models_dual_ssl.DualSSLWithinDomainSplitDistMatchingModel
+        else:
+            model_name = models_dual_ssl.DualSSLWithinDomainAllDistMatchingModel
+    ssl_model = model_name(
+        network=net, src_loader=tb_loader_train, trgt_loader=in12_loader_train, logger=logger, no_save=no_save,
+        tb_ssl_loss=tb_ssl_loss, in12_ssl_loss=in12_ssl_loss, tb_alpha=tb_alpha, in12_alpha=in12_alpha,
+        div_alpha=div_alpha, ignore_div_loss=ignore_div_loss, asymmetric=asymmetric, use_ot=use_ot,
+        div_metric=div_metric, fixed_div_alpha=True, combined_fwd_pass=combined_forward_pass,
+        track_knn_acc=track_knn_acc, queue_size=queue_factor * b_size)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
                                 momentum=0.9, nesterov=True)
