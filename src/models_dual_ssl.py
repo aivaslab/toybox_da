@@ -507,16 +507,23 @@ class DualSSLWithinDomainAllDistMatchingModel(DualSSLWithinDomainDistMatchingMod
     def __init__(self, **kwargs):
         self.use_ot = kwargs['use_ot']
         self.asymmetric = kwargs["asymmetric"]
-        self.fixed_div_alpha = kwargs["fixed_div_alpha"]
+        self.div_alpha_schedule = kwargs["div_alpha_schedule"]
+        self.div_alpha_start = kwargs["div_alpha_start"]
         self.div_alpha = kwargs["div_alpha"]
         super().__init__(**kwargs)
 
     def get_div_alpha(self, step, steps, ep, ep_total):
-        if self.fixed_div_alpha:
-            return self.div_alpha
-        total_steps = steps * ep_total
-        curr_step = steps * (ep - 1) + step
-        frac = 1 - 0.5 * (1 + np.cos(curr_step * np.pi / total_steps))
+        if ep <= self.div_alpha_start:
+            frac = 0.0
+        else:
+            total_steps = steps * (ep_total - self.div_alpha_start)
+            curr_step = steps * (ep - 1 - self.div_alpha_start) + step
+            if self.div_alpha_schedule == "fixed":
+                frac = 1.0
+            elif self.div_alpha_schedule == "cosine":
+                frac = 1 - 0.5 * (1 + np.cos(curr_step * np.pi / total_steps))
+            else:
+                frac = curr_step / total_steps
         return self.div_alpha * frac
 
     def calculate_domain_dist_matching_loss(self, src_feats, trgt_feats):
@@ -614,16 +621,23 @@ class DualSSLWithinDomainSplitDistMatchingModel(DualSSLWithinDomainSplitDistMatc
     def __init__(self, **kwargs):
         self.use_ot = kwargs['use_ot']
         self.asymmetric = kwargs["asymmetric"]
-        self.fixed_div_alpha = kwargs["fixed_div_alpha"]
+        self.div_alpha_schedule = kwargs["div_alpha_schedule"]
+        self.div_alpha_start = kwargs["div_alpha_start"]
         self.div_alpha = kwargs["div_alpha"]
         super().__init__(**kwargs)
 
     def get_div_alpha(self, step, steps, ep, ep_total):
-        if self.fixed_div_alpha:
-            return self.div_alpha
-        total_steps = steps * ep_total
-        curr_step = steps * (ep - 1) + step
-        frac = 1 - 0.5 * (1 + np.cos(curr_step * np.pi / total_steps))
+        if ep <= self.div_alpha_start:
+            frac = 0.0
+        else:
+            total_steps = steps * (ep_total - self.div_alpha_start)
+            curr_step = steps * (ep - 1 - self.div_alpha_start) + step
+            if self.div_alpha_schedule == "fixed":
+                frac = 1.0
+            elif self.div_alpha_schedule == "cosine":
+                frac = 1 - 0.5 * (1 + np.cos(curr_step * np.pi / total_steps))
+            else:
+                frac = curr_step / total_steps
         return self.div_alpha * frac
 
     def calculate_domain_dist_matching_loss(self, src_feats, trgt_feats):

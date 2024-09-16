@@ -76,6 +76,8 @@ def run_training(exp_args):
     queue_factor = exp_args['queue_factor']
     split_div_loss = exp_args['split_div_loss']
     num_split_images = exp_args['num_split_images']
+    div_alpha_schedule = exp_args['div_alpha_type']
+    div_alpha_start = exp_args['div_alpha_start']
 
     tb_transform_train = tb_in12_transforms.get_ssl_transform(dset="toybox")
     tb_loader_train = get_dataloader(dset="toybox", batch_size=b_size, ssl_type=tb_ssl_type,
@@ -120,8 +122,9 @@ def run_training(exp_args):
         network=net, src_loader=tb_loader_train, trgt_loader=in12_loader_train, logger=logger, no_save=no_save,
         tb_ssl_loss=tb_ssl_loss, in12_ssl_loss=in12_ssl_loss, tb_alpha=tb_alpha, in12_alpha=in12_alpha,
         div_alpha=div_alpha, ignore_div_loss=ignore_div_loss, asymmetric=asymmetric, use_ot=use_ot,
-        div_metric=div_metric, fixed_div_alpha=True, combined_fwd_pass=combined_forward_pass,
-        track_knn_acc=track_knn_acc, queue_size=queue_factor * b_size, num_split_images=num_split_images)
+        div_metric=div_metric, combined_fwd_pass=combined_forward_pass, div_alpha_schedule=div_alpha_schedule,
+        div_alpha_start=div_alpha_start, track_knn_acc=track_knn_acc, queue_size=queue_factor * b_size,
+        num_split_images=num_split_images)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
                                 momentum=0.9, nesterov=True)
