@@ -396,6 +396,7 @@ class DualSSLWithinDomainDistMatchingModelBase:
                     src_dist_mat = self.get_paired_distance(src_feats=src_anchor_feats,
                                                             trgt_feats=self.tb_feats_queue,
                                                             metric="cosine")
+
                     # Get top-2 closest image and discard closest (this should be the image itself) for src feats
                     src_topk_closest_indices = torch.topk(src_dist_mat, k=src_k+1, largest=True).indices[:, 1:]
                     src_topk_labels = self.tb_labels_queue[src_topk_closest_indices]
@@ -410,6 +411,22 @@ class DualSSLWithinDomainDistMatchingModelBase:
                     # Calculate src accuracies
                     src_acc = round(100 * src_topk_matches.item() / (src_k * len(dupl_src_labels)), 2)
                     src_neg_acc = round(100 * src_farthest_matches.item() / (src_k * len(dupl_src_labels)), 2)
+
+                    src_q_dist_mat = self.get_paired_distance(src_feats=self.tb_feats_queue,
+                                                              trgt_feats=self.tb_feats_queue,
+                                                              metric="cosine")
+
+                    src_q_cl_match_matrix = (self.tb_labels_queue.unsqueeze(1) ==
+                                             self.tb_labels_queue.unsqueeze(0)).int()
+                    src_q_cl_mismatch_matrix = torch.ones_like(src_q_cl_match_matrix) - src_q_cl_match_matrix
+                    assert torch.sum(src_q_cl_match_matrix) + torch.sum(src_q_cl_mismatch_matrix) == \
+                           src_q_cl_match_matrix.shape[0] * src_q_cl_match_matrix.shape[1]
+
+                    tb_cl_match_dists = src_q_dist_mat * src_q_cl_match_matrix
+                    tb_cl_mismatch_dists = src_q_dist_mat * src_q_cl_mismatch_matrix
+
+                    tb_cl_match_ave_dist = torch.sum(tb_cl_match_dists) / torch.sum(src_q_cl_match_matrix)
+                    tb_cl_mismatch_ave_dist = torch.sum(tb_cl_mismatch_dists) / torch.sum(src_q_cl_mismatch_matrix)
 
                     # trgt_dist_mat = self.get_distance(feats=trgt_anchor_feats, metric="cosine")
                     trgt_dist_mat = self.get_paired_distance(src_feats=trgt_anchor_feats,
@@ -432,12 +449,31 @@ class DualSSLWithinDomainDistMatchingModelBase:
                     trgt_acc = round(100 * trgt_topk_matches.item() / (trgt_k * len(trgt_labels)), 2)
                     trgt_neg_acc = round(100 * trgt_farthest_matches.item() / (trgt_k * len(trgt_labels)), 2)
 
+                    trgt_q_dist_mat = self.get_paired_distance(src_feats=self.in12_feats_queue,
+                                                               trgt_feats=self.in12_feats_queue,
+                                                               metric="cosine")
+
+                    trgt_q_cl_match_matrix = (self.in12_labels_queue.unsqueeze(1) ==
+                                              self.in12_labels_queue.unsqueeze(0)).int()
+                    trgt_q_cl_mismatch_matrix = torch.ones_like(trgt_q_cl_match_matrix) - trgt_q_cl_match_matrix
+                    assert torch.sum(trgt_q_cl_match_matrix) + torch.sum(trgt_q_cl_mismatch_matrix) == \
+                           trgt_q_cl_match_matrix.shape[0] * trgt_q_cl_match_matrix.shape[1]
+
+                    in12_cl_match_dists = trgt_q_dist_mat * trgt_q_cl_match_matrix
+                    in12_cl_mismatch_dists = trgt_q_dist_mat * trgt_q_cl_mismatch_matrix
+
+                    in12_cl_match_ave_dist = torch.sum(in12_cl_match_dists) / torch.sum(trgt_q_cl_match_matrix)
+                    in12_cl_mismatch_ave_dist = torch.sum(in12_cl_mismatch_dists) / torch.sum(trgt_q_cl_mismatch_matrix)
                     src_acc_total += src_acc
                     src_neg_acc_total += src_neg_acc
                     trgt_acc_total += trgt_acc
                     trgt_neg_acc_total += trgt_neg_acc
                 logger_strs.append(f"A1:{src_acc_total/num_batches:.2f} A2:{trgt_acc_total/num_batches:.2f} "
-                                   f"A3:{src_neg_acc_total/num_batches:.2f} A4:{trgt_neg_acc_total/num_batches:.2f} ")
+                                   f"A3:{src_neg_acc_total/num_batches:.2f} A4:{trgt_neg_acc_total/num_batches:.2f}")
+                logger_strs.append(
+                    f"D:[{tb_cl_match_ave_dist:.2f} {tb_cl_mismatch_ave_dist:.2f} "
+                    f"{in12_cl_match_ave_dist:.2f} {in12_cl_mismatch_ave_dist:.2f}]"
+                )
                 tb_scalar_dicts["knn_queue"] = {
                     'tb_queue_size': len(self.tb_labels_queue),
                     'in12_queue_size': len(self.in12_labels_queue),
@@ -543,11 +579,11 @@ class DualSSLWithinDomainSplitDistMatchingModelBase(DualSSLWithinDomainDistMatch
         logger_strs.append(f"EMD1:{tracking_vars['closest_div_loss_emd_total'] / tracking_vars['num_batches']:.3f} "
                            f"EMD2:{tracking_vars['farthest_div_loss_emd_total'] / tracking_vars['num_batches']:.3f} "
                            f"MMD1:{tracking_vars['closest_div_loss_mmd_total'] / tracking_vars['num_batches']:.3f} "
-                           f"MMD2:{tracking_vars['farthest_div_loss_mmd_total'] / tracking_vars['num_batches']:.3f} "
-                           f"D:[{tracking_vars['closest_src_dist_total'] / tracking_vars['num_batches']:.2f} "
-                           f"{tracking_vars['closest_trgt_dist_total'] / tracking_vars['num_batches']:.2f} "
-                           f"{tracking_vars['farthest_src_dist_total'] / tracking_vars['num_batches']:.2f} "
-                           f"{tracking_vars['farthest_trgt_dist_total'] / tracking_vars['num_batches']:.2f}]"
+                           f"MMD2:{tracking_vars['farthest_div_loss_mmd_total'] / tracking_vars['num_batches']:.3f}"
+                           # f"D:[{tracking_vars['closest_src_dist_total'] / tracking_vars['num_batches']:.2f} "
+                           # f"{tracking_vars['closest_trgt_dist_total'] / tracking_vars['num_batches']:.2f} "
+                           # f"{tracking_vars['farthest_src_dist_total'] / tracking_vars['num_batches']:.2f} "
+                           # f"{tracking_vars['farthest_trgt_dist_total'] / tracking_vars['num_batches']:.2f}]"
                            )
         tb_scalar_dicts["dom_dist_loss"] = {
             'closest_div_loss_emd_ep': tracking_vars["closest_div_loss_emd_total"] / tracking_vars["num_batches"],
@@ -559,7 +595,7 @@ class DualSSLWithinDomainSplitDistMatchingModelBase(DualSSLWithinDomainDistMatch
             'farthest_div_loss_mmd_ep': tracking_vars["farthest_div_loss_mmd_total"] / tracking_vars["num_batches"],
             'farthest_div_loss_mmd_batch': farthest_div_dist_mmd_loss.item(),
         }
-        tb_scalar_dicts["dom_dist"] = {
+        tb_scalar_dicts["closest_queue_dist"] = {
             "src_closest_dist": tracking_vars["closest_src_dist_total"] / tracking_vars["num_batches"],
             "src_farthest_dist": tracking_vars["farthest_src_dist_total"] / tracking_vars["num_batches"],
             "trgt_closest_dist": tracking_vars["closest_trgt_dist_total"] / tracking_vars["num_batches"],
