@@ -537,28 +537,32 @@ class DualSSLWithinDomainAllDistMatchingModel(DualSSLWithinDomainDistMatchingMod
 
 class DualSSLWithinDomainSplitDistMatchingModelBase(DualSSLWithinDomainDistMatchingModelBase):
     def __init__(self, **kwargs):
+        self.num_split_images = kwargs['num_split_images']
         super().__init__(**kwargs)
 
     def track_domain_dist_matching_loss(self, src_feats, trgt_feats, tracking_vars, tb_scalar_dicts, logger_strs):
+        k = self.num_split_images
         with torch.no_grad():
             src_feats_dists = self.get_distance(src_feats, metric=self.div_metric)
             trgt_feats_dists = self.get_distance(trgt_feats, metric=self.div_metric)
 
             if self.div_metric == "euclidean":
-                src_closest_dists = torch.topk(src_feats_dists, k=2, largest=False).values[:, 1]
-                src_farthest_dists = torch.topk(src_feats_dists, k=1, largest=True).values[:, 0]
-                trgt_closest_dists = torch.topk(trgt_feats_dists, k=2, largest=False).values[:, 1]
-                trgt_farthest_dists = torch.topk(trgt_feats_dists, k=1, largest=True).values[:, 0]
+                src_closest_dists = torch.topk(src_feats_dists, k=k+1, largest=False).values[:, 1:]
+                src_farthest_dists = torch.topk(src_feats_dists, k=k, largest=True).values[:, 0:]
+                trgt_closest_dists = torch.topk(trgt_feats_dists, k=k+1, largest=False).values[:, 1:]
+                trgt_farthest_dists = torch.topk(trgt_feats_dists, k=k, largest=True).values[:, 0:]
             else:
-                src_closest_dists = torch.topk(src_feats_dists, k=2, largest=True).values[:, 1]
-                src_farthest_dists = torch.topk(src_feats_dists, k=1, largest=False).values[:, 0]
-                trgt_closest_dists = torch.topk(trgt_feats_dists, k=2, largest=True).values[:, 1]
-                trgt_farthest_dists = torch.topk(trgt_feats_dists, k=1, largest=False).values[:, 0]
+                src_closest_dists = torch.topk(src_feats_dists, k=k+1, largest=True).values[:, 1:]
+                src_farthest_dists = torch.topk(src_feats_dists, k=k, largest=False).values[:, 0:]
+                trgt_closest_dists = torch.topk(trgt_feats_dists, k=k+1, largest=True).values[:, 1:]
+                trgt_farthest_dists = torch.topk(trgt_feats_dists, k=k, largest=False).values[:, 0:]
 
             src_closest_dists = torch.reshape(src_closest_dists, (-1, 1))
             src_farthest_dists = torch.reshape(src_farthest_dists, (-1, 1))
             trgt_closest_dists = torch.reshape(trgt_closest_dists, (-1, 1))
             trgt_farthest_dists = torch.reshape(trgt_farthest_dists, (-1, 1))
+            # print(src_closest_dists.shape, src_farthest_dists.shape, trgt_closest_dists.shape,
+            #       trgt_farthest_dists.shape)
 
             closest_div_dist_emd_loss = self.emd_dist_loss(src_closest_dists, trgt_closest_dists)
             farthest_div_dist_emd_loss = self.emd_dist_loss(src_farthest_dists, trgt_farthest_dists)

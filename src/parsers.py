@@ -87,5 +87,6 @@ def get_dual_ssl_class_mmd_v1_parser():
                                                                                      "loss using closest and farthest "
                                                                                      "distances instead of all "
                                                                                      "distances")
-
+    parser.add_argument("--num-split-images", type=int, default=1,
+                        help="Number of images to consider for split div loss")
     return parser
