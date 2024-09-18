@@ -14,7 +14,7 @@ import mmd_util
 class JANModel:
     """Module implementing the JAN architecture"""
     
-    def __init__(self, network, source_loader, target_loader, combined_batch, logger, no_save=False):
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger, asymmetric, no_save=False):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -29,6 +29,7 @@ class JANModel:
         self.logger = logger
         self.combined_batch = combined_batch
         self.no_save = no_save
+        self.asymmetric = asymmetric
         self.network.cuda()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
@@ -66,6 +67,11 @@ class JANModel:
                 trgt_bb_feats, trgt_btl_feats, trgt_logits = self.network.forward(trgt_images)
 
             src_loss = src_criterion(src_logits, src_labels)
+
+            if self.asymmetric:
+                src_bb_feats, src_btl_feats, src_logits = (src_bb_feats.clone().detach(),
+                                                           src_btl_feats.clone().detach(),
+                                                           src_logits.clone().detach())
 
             jmmd_loss = self.jmmd_loss(
                 (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),

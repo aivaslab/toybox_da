@@ -72,6 +72,8 @@ def get_parser():
     parser.add_argument("--p", "-p", default=0.5, type=float, help="Probability of Dropout")
     parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of saving model")
     parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
+    parser.add_argument("--asymmetric", default=False, action='store_true', help="Use this flag to use asymmetric "
+                                                                                 "JAN loss")
     return vars(parser.parse_args())
 
 
@@ -135,7 +137,7 @@ def eval_model(exp_args):
                                   classifier_weights=cl_wts, dropout=dropout)
 
     model = models_da.JANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-                               logger=logger, combined_batch=True, no_save=True)
+                               logger=logger, combined_batch=True, no_save=True, asymmetric=True)
 
     all_loaders = {
         'tb_train': src_loader_train,
@@ -204,6 +206,7 @@ def main():
     dropout_p = exp_args['p']
     save_freq = exp_args['save_freq']
     save_dir = exp_args['save_dir']
+    asymmetric = exp_args['asymmetric']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
@@ -291,7 +294,7 @@ def main():
                                       p=dropout_p)
 
     model = models_da.JANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-                               logger=logger, combined_batch=combined_batch, no_save=no_save)
+                               logger=logger, combined_batch=combined_batch, no_save=no_save, asymmetric=asymmetric)
 
     bb_lr_wt = 0.1 if (exp_args['pretrained'] or
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
