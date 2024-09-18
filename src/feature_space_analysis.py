@@ -229,7 +229,7 @@ def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, supe
                 data, labels = [cl_match_dists, super_cl_match_dists, super_cl_mismatch_dists], \
                                 ["class_match", "superclass_match", "super_class_mismatch"]
             else:
-                data, labels = [cl_match_dists, cl_mismatch_dists], ["class_match", "superclass_match"]
+                data, labels = [cl_match_dists, cl_mismatch_dists], ["class_match", "class_mismatch"]
 
             plot_histogram(axis=axes[path_idx][idx], data=data, n_bins=100,
                            x_range=(0.0, max_val), labels=labels, ax_title=f"{row_titles[path_idx]}-{dset}")
