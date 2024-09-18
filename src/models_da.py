@@ -6,8 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as func
 import torch.utils.tensorboard as tb
-from torch.cuda.amp import GradScaler
-from torch import autocast
 
 import utils
 import mmd_util
@@ -16,7 +14,7 @@ import mmd_util
 class JANModel:
     """Module implementing the JAN architecture"""
     
-    def __init__(self, network, source_loader, target_loader, combined_batch, logger, use_amp, no_save=False):
+    def __init__(self, network, source_loader, target_loader, combined_batch, logger, no_save=False):
         self.network = network
         self.source_loader = utils.ForeverDataLoader(source_loader)
         self.target_loader = utils.ForeverDataLoader(target_loader)
@@ -30,12 +28,8 @@ class JANModel:
         self.jmmd_loss.train()
         self.logger = logger
         self.combined_batch = combined_batch
-        self.use_amp = use_amp
         self.no_save = no_save
         self.network.cuda()
-
-        if self.use_amp:
-            self.scaler = GradScaler()
     
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
@@ -62,11 +56,7 @@ class JANModel:
             
             if self.combined_batch:
                 comb_images = torch.concat([src_images, trgt_images], dim=0)
-                if self.use_amp:
-                    with autocast(device_type='cuda', dtype=torch.float16):
-                        bb_feats, btl_feats, logits = self.network.forward(comb_images)
-                else:
-                    bb_feats, btl_feats, logits = self.network.forward(comb_images)
+                bb_feats, btl_feats, logits = self.network.forward(comb_images)
                 src_size = src_images.shape[0]
                 src_bb_feats, src_btl_feats, src_logits = bb_feats[:src_size], btl_feats[:src_size], logits[:src_size]
                 trgt_bb_feats, trgt_btl_feats, trgt_logits = \
@@ -75,27 +65,14 @@ class JANModel:
                 src_bb_feats, src_btl_feats, src_logits = self.network.forward(src_images)
                 trgt_bb_feats, trgt_btl_feats, trgt_logits = self.network.forward(trgt_images)
 
-            if self.use_amp:
-                with autocast(device_type='cuda', dtype=torch.float16):
-                    src_loss = src_criterion(src_logits, src_labels)
+            src_loss = src_criterion(src_logits, src_labels)
 
-                    jmmd_loss = self.jmmd_loss((src_bb_feats, src_btl_feats, src_logits),
-                                               (trgt_bb_feats, trgt_btl_feats, trgt_logits))
-                        # (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
-                        # (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
-                    total_loss = src_loss + alfa * jmmd_loss
-                    self.scaler.scale(total_loss).backward()
-                    self.scaler.step(optimizer)
-                    self.scaler.update()
-            else:
-                src_loss = src_criterion(src_logits, src_labels)
-
-                jmmd_loss = self.jmmd_loss(
-                    (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
-                    (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
-                total_loss = src_loss + alfa * jmmd_loss
-                total_loss.backward()
-                optimizer.step()
+            jmmd_loss = self.jmmd_loss(
+                (src_bb_feats, src_btl_feats, func.softmax(src_logits, dim=1)),
+                (trgt_bb_feats, trgt_btl_feats, func.softmax(trgt_logits, dim=1)))
+            total_loss = src_loss + alfa * jmmd_loss
+            total_loss.backward()
+            optimizer.step()
             
             ce_loss_total += src_loss.item()
             jmmd_loss_total += jmmd_loss.item()

@@ -66,7 +66,6 @@ def get_parser():
                         help="Use this option to specify the directory from which model weights should be loaded")
     parser.add_argument("--dropout", "-drop", default=0, type=int, choices=[0, 1, 2, 3],
                         help="Use this flag to enable dropout")
-    parser.add_argument("--amp", default=False, action='store_true', help="Use AMP training")
     parser.add_argument("--no-save", default=False, action='store_true', help="Use this flag to not save anything")
     parser.add_argument("--mode", default="train", choices=["train", "eval"],
                         help="Use this flag to specify the run mode")
@@ -136,7 +135,7 @@ def eval_model(exp_args):
                                   classifier_weights=cl_wts, dropout=dropout)
 
     model = models_da.JANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-                               logger=logger, combined_batch=True, use_amp=exp_args['amp'], no_save=True)
+                               logger=logger, combined_batch=True, no_save=True)
 
     all_loaders = {
         'tb_train': src_loader_train,
@@ -202,12 +201,9 @@ def main():
     combined_batch = exp_args['combined_batch']
     dropout = exp_args['dropout']
     no_save = exp_args['no_save']
-    amp = exp_args['amp']
     dropout_p = exp_args['p']
     save_freq = exp_args['save_freq']
     save_dir = exp_args['save_dir']
-    if amp:
-        torch.set_float32_matmul_precision('high')
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
@@ -295,7 +291,7 @@ def main():
                                       p=dropout_p)
 
     model = models_da.JANModel(network=net, source_loader=src_loader_train, target_loader=trgt_loader_train,
-                               logger=logger, combined_batch=combined_batch, use_amp=amp, no_save=no_save)
+                               logger=logger, combined_batch=combined_batch, no_save=no_save)
 
     bb_lr_wt = 0.1 if (exp_args['pretrained'] or
                        (exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']))) \
