@@ -195,14 +195,21 @@ class DualSSLWithinDomainDistMatchingModelBase:
         self.in12_feats_queue = None
         self.in12_labels_queue = None
         self.track_knn_acc = kwargs["track_knn_acc"]
+        self.ind_mmd_loss = kwargs["ind_mmd_loss"]
         self.dist_frac = 0.05
 
         self.emd_dist_loss = mmd_util.EMD1DLoss()
-        self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
-            kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
-                     ),
-            linear=False,
-        ).cuda()
+        if self.ind_mmd_loss:
+            self.mmd_dist_loss = mmd_util.IndividualMMDLoss(
+                kernels=[mmd_util.IndGaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+                linear=False,
+            ).cuda()
+        else:
+            self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+                kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+                         ),
+                linear=False,
+            ).cuda()
 
         num_params_trainable, num_params = self.network.count_trainable_parameters()
         self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
@@ -234,13 +241,16 @@ class DualSSLWithinDomainDistMatchingModelBase:
     def track_domain_dist_matching_loss(self, src_feats, trgt_feats, tracking_vars, tb_scalar_dicts, logger_strs):
         with torch.no_grad():
             src_feats_dists = self.get_distance(src_feats, metric=self.div_metric)
-            src_feats_dists = torch.reshape(src_feats_dists, (-1, 1))
+            src_feats_dists_reshaped = torch.reshape(src_feats_dists, (-1, 1))
 
             trgt_feats_dists = self.get_distance(trgt_feats, metric=self.div_metric)
-            trgt_feats_dists = torch.reshape(trgt_feats_dists, (-1, 1))
+            trgt_feats_dists_reshaped = torch.reshape(trgt_feats_dists, (-1, 1))
 
-            div_dist_emd_loss = self.emd_dist_loss(src_feats_dists, trgt_feats_dists)
-            div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists,), (trgt_feats_dists,))
+            div_dist_emd_loss = self.emd_dist_loss(src_feats_dists_reshaped, trgt_feats_dists_reshaped)
+            if self.ind_mmd_loss:
+                div_dist_mmd_loss = self.mmd_dist_loss(src_feats_dists, trgt_feats_dists)
+            else:
+                div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists_reshaped,), (trgt_feats_dists_reshaped,))
             tracking_vars["div_loss_emd_total"] += div_dist_emd_loss.item()
             tracking_vars["div_loss_mmd_total"] += div_dist_mmd_loss.item()
             tracking_vars["src_dist_total"] += torch.mean(src_feats_dists).item()
@@ -380,6 +390,7 @@ class DualSSLWithinDomainDistMatchingModelBase:
                 # calculation
                 with torch.no_grad():
                     dupl_src_labels = torch.cat([src_labels for _ in range(2)], dim=0)
+
                     if self.tb_feats_queue is None:
                         self.tb_feats_queue = src_anchor_feats
                         self.tb_labels_queue = dupl_src_labels
@@ -391,6 +402,79 @@ class DualSSLWithinDomainDistMatchingModelBase:
                         self.in12_feats_queue = torch.cat((self.in12_feats_queue, trgt_anchor_feats))[
                                                 -self.queue_size:, :]
                         self.in12_labels_queue = torch.cat((self.in12_labels_queue, trgt_labels))[-self.queue_size:]
+                    # print(len(self.tb_feats_queue), len(self.in12_feats_queue))
+
+                    if step == steps and len(self.in12_feats_queue) > 200:
+                        acc_log_strs = ["Accs:"]
+                        src_accs, trgt_accs, src_neg_accs, trgt_neg_accs, dist_fracs = [], [], [], [], []
+                        for dist_frac in [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]:
+                            src_k = max(int(dist_frac * len(self.tb_feats_queue)), 1)
+                            src_dist_mat = self.get_paired_distance(src_feats=src_anchor_feats,
+                                                                    trgt_feats=self.tb_feats_queue,
+                                                                    metric="cosine")
+
+                            # Get top-2 closest image and discard closest
+                            # (this should be the image itself) for src feats
+                            src_topk_closest_indices = torch.topk(src_dist_mat,
+                                                                  k=min(src_k + 1, len(self.tb_feats_queue)),
+                                                                  largest=True).indices
+                            src_topk_labels = self.tb_labels_queue[src_topk_closest_indices]
+                            src_topk_matches = torch.sum((src_topk_labels == dupl_src_labels.unsqueeze(1)).int())
+                            # print(src_topk_matches)
+
+                            # Get the furthest image for src feats
+                            _, src_topk_farthest_indices = torch.topk(src_dist_mat, k=src_k, largest=False)
+                            src_farthest_labels = self.tb_labels_queue[src_topk_farthest_indices]
+                            src_farthest_matches = torch.sum(
+                                (src_farthest_labels == dupl_src_labels.unsqueeze(1)).int())
+
+                            # Calculate src accuracies
+                            src_acc = round(100 * src_topk_matches.item() / (src_k * len(dupl_src_labels)), 2)
+                            src_neg_acc = round(100 * src_farthest_matches.item() / (src_k * len(dupl_src_labels)), 2)
+
+                            # trgt_dist_mat = self.get_distance(feats=trgt_anchor_feats, metric="cosine")
+                            trgt_dist_mat = self.get_paired_distance(src_feats=trgt_anchor_feats,
+                                                                     trgt_feats=self.in12_feats_queue,
+                                                                     metric="cosine")
+                            trgt_k = int(dist_frac * len(self.in12_feats_queue))
+
+                            # Get top-2 closes image and discard closest
+                            # (this should be the image itself) for trgt feats
+                            trgt_topk_closest_indices = torch.topk(trgt_dist_mat,
+                                                                   k=min(trgt_k + 1, len(self.in12_feats_queue)),
+                                                                   largest=True).indices
+                            trgt_topk_labels = self.in12_labels_queue[trgt_topk_closest_indices]
+                            trgt_topk_matches = torch.sum((trgt_topk_labels == trgt_labels.unsqueeze(1)).int())
+                            # trgt_topk_labels = self.in12_labels_queue[trgt_topk_closest_indices][:, 1]
+
+                            # Get the furthest image for trgt feats
+                            _, trgt_topk_farthest_indices = torch.topk(trgt_dist_mat, k=trgt_k, largest=False)
+                            trgt_farthest_labels = self.in12_labels_queue[trgt_topk_farthest_indices]
+                            trgt_farthest_matches = torch.sum((trgt_farthest_labels == trgt_labels.unsqueeze(1)).int())
+                            # trgt_farthest_labels = self.in12_labels_queue[trgt_topk_farthest_indices][:, 0]
+
+                            # Calculate trgt accuracies
+                            trgt_acc = round(100 * trgt_topk_matches.item() / (trgt_k * len(trgt_labels)), 2)
+                            trgt_neg_acc = round(100 * trgt_farthest_matches.item() / (trgt_k * len(trgt_labels)), 2)
+                            dist_fracs.append(dist_frac)
+                            src_accs.append(src_acc)
+                            src_neg_accs.append(src_neg_acc)
+                            trgt_accs.append(trgt_acc)
+                            trgt_neg_accs.append(trgt_neg_acc)
+                            acc_log_strs.append(f"{dist_frac:.2f}: [{src_acc:.1f} {trgt_acc:.1f} {src_neg_acc:.1f}"
+                                                f" {trgt_neg_acc:.1f}]")
+                        self.logger.info(" ".join(acc_log_strs))
+                        tb_scalar_dicts["knn_src_acc_distribution"] = {}
+                        tb_scalar_dicts["knn_src_neg_acc_distribution"] = {}
+                        tb_scalar_dicts["knn_trgt_acc_distribution"] = {}
+                        tb_scalar_dicts["knn_trgt_neg_acc_distribution"] = {}
+                        for i in range(len(dist_fracs)):
+                            dist_frac, src_acc, src_neg_acc, trgt_acc, trgt_neg_acc = dist_fracs[i], src_accs[i], \
+                                src_neg_accs[i], trgt_accs[i], trgt_neg_accs[i]
+                            tb_scalar_dicts["knn_src_acc_distribution"][str(dist_frac)] = src_acc
+                            tb_scalar_dicts["knn_trgt_acc_distribution"][str(dist_frac)] = trgt_acc
+                            tb_scalar_dicts["knn_src_neg_acc_distribution"][str(dist_frac)] = src_neg_acc
+                            tb_scalar_dicts["knn_trgt_neg_acc_distribution"][str(dist_frac)] = trgt_neg_acc
 
                     src_k = max(int(self.dist_frac * len(self.tb_feats_queue)), 1)
                     src_dist_mat = self.get_paired_distance(src_feats=src_anchor_feats,
@@ -411,22 +495,6 @@ class DualSSLWithinDomainDistMatchingModelBase:
                     # Calculate src accuracies
                     src_acc = round(100 * src_topk_matches.item() / (src_k * len(dupl_src_labels)), 2)
                     src_neg_acc = round(100 * src_farthest_matches.item() / (src_k * len(dupl_src_labels)), 2)
-
-                    src_q_dist_mat = self.get_paired_distance(src_feats=self.tb_feats_queue,
-                                                              trgt_feats=self.tb_feats_queue,
-                                                              metric="cosine")
-
-                    src_q_cl_match_matrix = (self.tb_labels_queue.unsqueeze(1) ==
-                                             self.tb_labels_queue.unsqueeze(0)).int()
-                    src_q_cl_mismatch_matrix = torch.ones_like(src_q_cl_match_matrix) - src_q_cl_match_matrix
-                    assert torch.sum(src_q_cl_match_matrix) + torch.sum(src_q_cl_mismatch_matrix) == \
-                           src_q_cl_match_matrix.shape[0] * src_q_cl_match_matrix.shape[1]
-
-                    tb_cl_match_dists = src_q_dist_mat * src_q_cl_match_matrix
-                    tb_cl_mismatch_dists = src_q_dist_mat * src_q_cl_mismatch_matrix
-
-                    tb_cl_match_ave_dist = torch.sum(tb_cl_match_dists) / torch.sum(src_q_cl_match_matrix)
-                    tb_cl_mismatch_ave_dist = torch.sum(tb_cl_mismatch_dists) / torch.sum(src_q_cl_mismatch_matrix)
 
                     # trgt_dist_mat = self.get_distance(feats=trgt_anchor_feats, metric="cosine")
                     trgt_dist_mat = self.get_paired_distance(src_feats=trgt_anchor_feats,
@@ -453,6 +521,24 @@ class DualSSLWithinDomainDistMatchingModelBase:
                                                                trgt_feats=self.in12_feats_queue,
                                                                metric="cosine")
 
+                    # Calculate mean within-class and across class distances for source queue
+                    src_q_dist_mat = self.get_paired_distance(src_feats=self.tb_feats_queue,
+                                                              trgt_feats=self.tb_feats_queue,
+                                                              metric="cosine")
+
+                    src_q_cl_match_matrix = (self.tb_labels_queue.unsqueeze(1) ==
+                                             self.tb_labels_queue.unsqueeze(0)).int()
+                    src_q_cl_mismatch_matrix = torch.ones_like(src_q_cl_match_matrix) - src_q_cl_match_matrix
+                    assert torch.sum(src_q_cl_match_matrix) + torch.sum(src_q_cl_mismatch_matrix) == \
+                           src_q_cl_match_matrix.shape[0] * src_q_cl_match_matrix.shape[1]
+
+                    tb_cl_match_dists = src_q_dist_mat * src_q_cl_match_matrix
+                    tb_cl_mismatch_dists = src_q_dist_mat * src_q_cl_mismatch_matrix
+
+                    tb_cl_match_ave_dist = torch.sum(tb_cl_match_dists) / torch.sum(src_q_cl_match_matrix)
+                    tb_cl_mismatch_ave_dist = torch.sum(tb_cl_mismatch_dists) / torch.sum(src_q_cl_mismatch_matrix)
+
+                    # Calculate mean within-class and across class distances for source queue
                     trgt_q_cl_match_matrix = (self.in12_labels_queue.unsqueeze(1) ==
                                               self.in12_labels_queue.unsqueeze(0)).int()
                     trgt_q_cl_mismatch_matrix = torch.ones_like(trgt_q_cl_match_matrix) - trgt_q_cl_match_matrix
@@ -529,16 +615,19 @@ class DualSSLWithinDomainAllDistMatchingModel(DualSSLWithinDomainDistMatchingMod
     def calculate_domain_dist_matching_loss(self, src_feats, trgt_feats):
         src_feats_dists = self.get_distance(src_feats, metric=self.div_metric)
         if self.asymmetric:
-            src_feats_dists = torch.reshape(src_feats_dists, (-1, 1)).clone().detach()
-        else:
-            src_feats_dists = torch.reshape(src_feats_dists, (-1, 1))
+            src_feats_dists = src_feats_dists.clone().detach()
 
         trgt_feats_dists = self.get_distance(trgt_feats, metric=self.div_metric)
-        trgt_feats_dists = torch.reshape(trgt_feats_dists, (-1, 1))
+
+        src_feats_dists_reshaped = torch.reshape(src_feats_dists, (-1, 1))
+        trgt_feats_dists_reshaped = torch.reshape(trgt_feats_dists, (-1, 1))
         if self.use_ot:
-            div_dist_loss = self.emd_dist_loss(src_feats_dists, trgt_feats_dists)
+            div_dist_loss = self.emd_dist_loss(src_feats_dists_reshaped, trgt_feats_dists_reshaped)
         else:
-            div_dist_loss = self.mmd_dist_loss((src_feats_dists,), (trgt_feats_dists,))
+            if self.ind_mmd_loss:
+                div_dist_loss = self.mmd_dist_loss(src_feats_dists, trgt_feats_dists)
+            else:
+                div_dist_loss = self.mmd_dist_loss((src_feats_dists_reshaped,), (trgt_feats_dists_reshaped,))
         return div_dist_loss
 
 
