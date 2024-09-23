@@ -75,6 +75,9 @@ def get_dual_ssl_class_mmd_v1_parser():
                                                                                  "mmd loss during training")
     parser.add_argument("--use-ot", default=False, action='store_true', help="Use this flag to use OT-based loss "
                                                                              "instead of MMD")
+    parser.add_argument("--ind-mmd-loss", default=False, action='store_true', help="Use this flag to match profiles "
+                                                                                   "of individual datapoints between "
+                                                                                   "source and target")
     parser.add_argument("--div-metric", choices=["euclidean", "cosine", "dot"], default="cosine")
     parser.add_argument("--separate-forward-pass", default=False, action='store_true', help="Use this flag to have "
                                                                                             "separate forward passes "
@@ -93,4 +96,5 @@ def get_dual_ssl_class_mmd_v1_parser():
                                                                                         "alpha")
     parser.add_argument("--div-alpha-start", default=50, type=int, help="Schedule for distribution "
                                                                                         "alpha")
+    # parser.add_argument("--knn-dist-acc", default=0.05, type=float, )
     return parser

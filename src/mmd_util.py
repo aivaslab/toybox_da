@@ -117,6 +117,53 @@ def _update_index_matrix_2(batch_size: int, index_matrix: Optional[torch.Tensor]
     return index_matrix
 
 
+class IndividualMMDLoss(nn.Module):
+
+    def __init__(self, kernels: Sequence[nn.Module], linear: Optional[bool] = True):
+        super(IndividualMMDLoss, self).__init__()
+        self.kernels = kernels
+        self.index_matrix = None
+        self.linear = linear
+
+    def forward(self, z_s: torch.Tensor, z_t: torch.Tensor) -> torch.Tensor:
+        batch_size = int(z_s[0].size(-1))
+        self.index_matrix = _update_index_matrix_2(batch_size, self.index_matrix, self.linear).to(z_s[0].device)
+        self.index_matrix = self.index_matrix.unsqueeze(0).unsqueeze(0)
+        kernel_matrix = torch.ones_like(self.index_matrix)
+        layer_features = torch.cat([z_s.unsqueeze(1).repeat(1, z_t.shape[0], 1),
+                                    z_t.unsqueeze(0).repeat(z_s.shape[0], 1, 1)], dim=-1)
+        feats = sum(
+            [kernel(layer_features) for kernel in self.kernels])  # Add up the matrix of each kernel
+        feats *= kernel_matrix
+
+        # print(kernel_matrix, "kernel_matrix")
+        # Add 2 / (n-1) to make up for the value on the diagonal
+        # to ensure loss is positive in the non-linear version
+        bias_term = 2. / float(batch_size - 1) * torch.ones((z_s.shape[0], z_s.shape[0])).cuda()
+        loss = (feats * self.index_matrix).sum((-1, -2))
+        loss += bias_term
+        return torch.mean(loss)
+
+
+class IndGaussianKernel(nn.Module):
+    def __init__(self, sigma: Optional[float] = None, track_running_stats: Optional[bool] = True,
+                 alpha: Optional[float] = 1.):
+        super(IndGaussianKernel, self).__init__()
+        assert track_running_stats or sigma is not None
+        self.sigma_square = torch.tensor(sigma * sigma) if sigma is not None else None
+        self.track_running_stats = track_running_stats
+        self.alpha = alpha
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        # print(X.shape, "gk X")
+        l2_distance_square = ((X.unsqueeze(-1) - X.unsqueeze(-2)) ** 2)
+
+        if self.track_running_stats:
+            self.sigma_square = self.alpha * torch.mean(l2_distance_square.detach())
+
+        return torch.exp(-l2_distance_square / (2 * self.sigma_square))
+
+
 class GaussianKernel(nn.Module):
 
     def __init__(self, sigma: Optional[float] = None, track_running_stats: Optional[bool] = True,
