@@ -403,15 +403,17 @@ class DualSSLWithinDomainDistMatchingModelBase:
                                                 -self.queue_size:, :]
                         self.in12_labels_queue = torch.cat((self.in12_labels_queue, trgt_labels))[-self.queue_size:]
                     # print(len(self.tb_feats_queue), len(self.in12_feats_queue))
+                    src_dist_mat = self.get_paired_distance(src_feats=src_anchor_feats, trgt_feats=self.tb_feats_queue,
+                                                            metric="cosine")
+                    trgt_dist_mat = self.get_paired_distance(src_feats=trgt_anchor_feats,
+                                                             trgt_feats=self.in12_feats_queue,
+                                                             metric="cosine")
 
                     if step == steps and len(self.in12_feats_queue) > 200:
                         acc_log_strs = ["Accs:"]
                         src_accs, trgt_accs, src_neg_accs, trgt_neg_accs, dist_fracs = [], [], [], [], []
                         for dist_frac in [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]:
                             src_k = max(int(dist_frac * len(self.tb_feats_queue)), 1)
-                            src_dist_mat = self.get_paired_distance(src_feats=src_anchor_feats,
-                                                                    trgt_feats=self.tb_feats_queue,
-                                                                    metric="cosine")
 
                             # Get top-2 closest image and discard closest
                             # (this should be the image itself) for src feats
@@ -432,10 +434,6 @@ class DualSSLWithinDomainDistMatchingModelBase:
                             src_acc = round(100 * src_topk_matches.item() / (src_k * len(dupl_src_labels)), 2)
                             src_neg_acc = round(100 * src_farthest_matches.item() / (src_k * len(dupl_src_labels)), 2)
 
-                            # trgt_dist_mat = self.get_distance(feats=trgt_anchor_feats, metric="cosine")
-                            trgt_dist_mat = self.get_paired_distance(src_feats=trgt_anchor_feats,
-                                                                     trgt_feats=self.in12_feats_queue,
-                                                                     metric="cosine")
                             trgt_k = int(dist_frac * len(self.in12_feats_queue))
 
                             # Get top-2 closes image and discard closest
@@ -477,9 +475,6 @@ class DualSSLWithinDomainDistMatchingModelBase:
                             tb_scalar_dicts["knn_trgt_neg_acc_distribution"][str(dist_frac)] = trgt_neg_acc
 
                     src_k = max(int(self.dist_frac * len(self.tb_feats_queue)), 1)
-                    src_dist_mat = self.get_paired_distance(src_feats=src_anchor_feats,
-                                                            trgt_feats=self.tb_feats_queue,
-                                                            metric="cosine")
 
                     # Get top-2 closest image and discard closest (this should be the image itself) for src feats
                     src_topk_closest_indices = torch.topk(src_dist_mat, k=src_k+1, largest=True).indices[:, 1:]
@@ -496,10 +491,6 @@ class DualSSLWithinDomainDistMatchingModelBase:
                     src_acc = round(100 * src_topk_matches.item() / (src_k * len(dupl_src_labels)), 2)
                     src_neg_acc = round(100 * src_farthest_matches.item() / (src_k * len(dupl_src_labels)), 2)
 
-                    # trgt_dist_mat = self.get_distance(feats=trgt_anchor_feats, metric="cosine")
-                    trgt_dist_mat = self.get_paired_distance(src_feats=trgt_anchor_feats,
-                                                             trgt_feats=self.in12_feats_queue,
-                                                             metric="cosine")
                     trgt_k = int(self.dist_frac * len(self.in12_feats_queue))
                     # Get top-2 closes image and discard closest (this should be the image itself) for trgt feats
                     trgt_topk_closest_indices = torch.topk(trgt_dist_mat, k=trgt_k+1, largest=True).indices[:, 1:]
