@@ -590,6 +590,11 @@ class ResNet18SSL(nn.Module):
         feats = self.backbone.forward(x)
         return self.ssl_head.forward(feats)
 
+    def forward_w_feats(self, x):
+        """Forward using only classifier"""
+        feats = self.backbone.forward(x)
+        return feats, self.ssl_head.forward(feats)
+
     def freeze_train(self):
         """Unfreeze all weights for training"""
         for param in self.backbone.parameters():

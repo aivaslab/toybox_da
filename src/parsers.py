@@ -57,7 +57,7 @@ def get_dual_ssl_class_mmd_v1_parser():
 
     parser.add_argument("--tb-ssl-loss", choices=["simclr", "dcl", "sup_dcl"], default="sup_dcl",
                         help="Use this flag to choose ssl loss for toybox")
-    parser.add_argument("--in12-ssl-loss", choices=["simclr", "dcl"], default="dcl",
+    parser.add_argument("--in12-ssl-loss", choices=["simclr", "dcl", "nwdcl"], default="dcl",
                         help="Use this flag to choose ssl loss for in12")
     parser.add_argument("--tb-alpha", "-tba", default=1.0, type=float, help="Weight of TB contrastive loss in total "
                                                                             "loss")
@@ -96,5 +96,7 @@ def get_dual_ssl_class_mmd_v1_parser():
                                                                                         "alpha")
     parser.add_argument("--div-alpha-start", default=50, type=int, help="Schedule for distribution "
                                                                                         "alpha")
+    parser.add_argument("--use-bb-mmd", default=False, action='store_true', help="Use this option to use mmd "
+                                                                                 "loss on backbone feats")
     # parser.add_argument("--knn-dist-acc", default=0.05, type=float, )
     return parser

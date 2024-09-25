@@ -196,7 +196,10 @@ class DualSSLWithinDomainDistMatchingModelBase:
         self.in12_labels_queue = None
         self.track_knn_acc = kwargs["track_knn_acc"]
         self.ind_mmd_loss = kwargs["ind_mmd_loss"]
+        self.use_bb_mmd = kwargs["use_bb_mmd"]
         self.dist_frac = 0.05
+        self.neg_dcl_weight_min = 0.1
+        self.neg_dcl_weight_max = 10.0
 
         self.emd_dist_loss = mmd_util.EMD1DLoss()
         if self.ind_mmd_loss:
@@ -280,6 +283,12 @@ class DualSSLWithinDomainDistMatchingModelBase:
     def get_div_alpha(self, step, steps, ep, ep_total):
         return 0.0
 
+    def get_dcl_alpha(self, ep, step, steps, ep_total):
+        total_steps = ep_total * steps
+        curr_step = (ep - 1) * steps + step
+        ratio = (self.neg_dcl_weight_min / self.neg_dcl_weight_max) ** (1 / total_steps)
+        return self.neg_dcl_weight_max * (ratio ** (curr_step - 1))
+
     def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
         """Train model"""
 
@@ -321,42 +330,54 @@ class DualSSLWithinDomainDistMatchingModelBase:
             if self.combined_fwd_pass:
                 images = torch.cat([src_batch, trgt_batch], dim=0)
                 images = images.cuda()
-                feats = self.network.forward(images)
-                src_feats, trgt_feats = feats[:src_size], feats[src_size:]
+                bb_feats, ssl_feats = self.network.forward_w_feats(images)
+                src_bb_feats, trgt_bb_feats = bb_feats[:src_size], bb_feats[src_size:]
+                src_ssl_feats, trgt_ssl_feats = ssl_feats[:src_size], ssl_feats[src_size:]
             else:
                 src_batch, trgt_batch = src_batch.cuda(), trgt_batch.cuda()
-                src_feats = self.network.forward(src_batch)
-                trgt_feats = self.network.forward(trgt_batch)
+                src_bb_feats, src_ssl_feats = self.network.forward_w_feats(src_batch)
+                trgt_bb_feats, trgt_ssl_feats = self.network.forward_w_feats(trgt_batch)
 
-            src_anchor_feats = src_feats[:src_size//2]
-            trgt_anchor_feats = trgt_feats[:trgt_size//2]
-            # print(src_feats.shape, trgt_feats.shape)
+            src_anchor_feats_ssl = src_ssl_feats[:src_size//2]
+            src_anchor_feats_bb = src_bb_feats[:src_size//2]
+            trgt_anchor_feats_ssl = trgt_ssl_feats[:trgt_size//2]
+            trgt_anchor_feats_bb = trgt_bb_feats[:trgt_size//2]
+
             if self.tb_ssl_loss == "simclr":
-                src_logits, src_labels_info_nce = utils.info_nce_loss(features=src_feats, temp=0.5)
+                src_logits, src_labels_info_nce = utils.info_nce_loss(features=src_ssl_feats, temp=0.5)
                 src_loss = criterion(src_logits, src_labels_info_nce)
             elif self.tb_ssl_loss == "dcl":
-                src_loss = utils.decoupled_contrastive_loss(features=src_feats, temp=0.1)
+                src_loss = utils.decoupled_contrastive_loss(features=src_ssl_feats, temp=0.1)
             else:
                 concat_src_labels = torch.cat([src_labels for _ in range(4)], dim=0)
                 # print(src_labels.shape, concat_src_labels.shape)
-                src_loss = utils.sup_decoupled_contrastive_loss(features=src_feats, temp=0.1, labels=concat_src_labels)
+                src_loss = utils.sup_decoupled_contrastive_loss(features=src_ssl_feats, temp=0.1,
+                                                                labels=concat_src_labels)
 
-            if self.in12_ssl_loss == "dcl":
-                trgt_loss = utils.decoupled_contrastive_loss(features=trgt_feats, temp=0.1)
+            if self.in12_ssl_loss == "nwdcl":
+                neg_alpha = self.get_dcl_alpha(ep=ep, ep_total=ep_total, step=step, steps=steps)
+                trgt_loss = utils.neg_weighted_dcl(features=trgt_ssl_feats, temp=0.1, neg_weights_temp=neg_alpha)
+                logger_strs.append(f"tau: {neg_alpha:.2f}")
+            elif self.in12_ssl_loss == "dcl":
+                trgt_loss = utils.decoupled_contrastive_loss(features=trgt_ssl_feats, temp=0.1)
             else:
-                trgt_logits, trgt_labels = utils.info_nce_loss(features=trgt_feats, temp=0.5)
-                trgt_loss = criterion(trgt_logits, trgt_labels)
+                trgt_logits, trgt_labels_info_nce = utils.info_nce_loss(features=trgt_ssl_feats, temp=0.5)
+                trgt_loss = criterion(trgt_logits, trgt_labels_info_nce)
             src_loss_total += src_loss.item()
             trgt_loss_total += trgt_loss.item()
 
             logger_strs.append(f"SSL1:{src_loss_total / num_batches:.2f} SSL2:{trgt_loss_total / num_batches:.2f}")
             num_images_src = len(src_images[0])
-            src_feats_1, src_feats_2 = src_feats[:num_images_src], src_feats[num_images_src:2 * num_images_src],
-            src_feats_stacked = torch.stack(tensors=(src_feats_1, src_feats_2), dim=1).view(2 * num_images_src, -1)
-
             num_images_trgt = len(trgt_images[0])
-            trgt_feats_1 = trgt_feats[:num_images_trgt]
-
+            if self.use_bb_mmd:
+                src_feats_1, src_feats_2 = src_bb_feats[:num_images_src], \
+                                        src_bb_feats[num_images_src:2 * num_images_src]
+                trgt_feats_1 = trgt_bb_feats[:num_images_trgt]
+            else:
+                src_feats_1, src_feats_2 = src_ssl_feats[:num_images_src], \
+                    src_ssl_feats[num_images_src:2 * num_images_src]
+                trgt_feats_1 = trgt_ssl_feats[:num_images_trgt]
+            src_feats_stacked = torch.stack(tensors=(src_feats_1, src_feats_2), dim=1).view(2 * num_images_src, -1)
             self.track_domain_dist_matching_loss(src_feats=src_feats_stacked, trgt_feats=trgt_feats_1,
                                                  tracking_vars=tracking_vars, logger_strs=logger_strs,
                                                  tb_scalar_dicts=tb_scalar_dicts)
@@ -385,6 +406,11 @@ class DualSSLWithinDomainDistMatchingModelBase:
             }
 
             if self.track_knn_acc:
+                if self.use_bb_mmd:
+                    src_anchor_feats, trgt_anchor_feats = src_anchor_feats_bb, trgt_anchor_feats_bb
+                else:
+                    src_anchor_feats, trgt_anchor_feats = src_anchor_feats_ssl, trgt_anchor_feats_ssl
+                # print(src_anchor_feats.shape, trgt_anchor_feats.shape)
                 # Track within-batch accuracy using KNNs
                 # NOTE: This only considers the anchor images. Positive pairs are not considered for KNN acc.
                 # calculation
