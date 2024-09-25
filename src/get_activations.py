@@ -13,7 +13,7 @@ import networks
 import networks_da
 
 
-def get_activations(net, fc_size, data, jan=False, btlnk=False):
+def get_activations(net, fc_size, data, jan=False, btlnk=False, ssl=False):
     """Use the data to get activation"""
     len_train_data = len(data)
     data_loader = torchdata.DataLoader(data, batch_size=512, shuffle=False, num_workers=4)
@@ -28,6 +28,8 @@ def get_activations(net, fc_size, data, jan=False, btlnk=False):
                     _, feats, _ = net.forward(images)
                 else:
                     feats, _, _ = net.forward(images)
+            elif ssl:
+                feats = net.forward(images)
             else:
                 feats = net.forward(images)
             feats = feats.cpu()
@@ -84,6 +86,34 @@ def get_activations_sup(model_path, out_path, jan=False, btlnk=False):
     all_datasets = get_datasets()
     for dset_name, dset in all_datasets.items():
         indices, activations = get_activations(net=net, fc_size=fc_size, data=dset, jan=jan, btlnk=btlnk)
+        print(f"dset: {dset}  n: {len(dset)}  indices: {indices.shape}  activations: {activations.shape}")
+        np.save(file=out_path + f"{dset_name}_activations.npy", arr=activations)
+        np.save(file=out_path + f"{dset_name}_indices.npy", arr=indices)
+
+    del indices, activations, net, load_file, all_datasets
+    gc.collect()
+    torch.cuda.empty_cache()
+    print(f"dest: {out_path}\n--------------------------------------------------------------------------------")
+
+
+def get_activations_ssl(model_path, out_path):
+    """Get the activations from a supervised model"""
+    assert os.path.isfile(model_path)
+    out_path += "ssl/activations/"
+    os.makedirs(out_path, exist_ok=True)
+    print(f"--------------------------------------------------------------------------------\nsrc: {model_path}")
+
+    load_file = torch.load(model_path)
+    net = networks.ResNet18SSL(backbone_weights=load_file['backbone'], ssl_weights=load_file['ssl_head'])
+    fc_size = 128
+    # net = networks.ResNet18Backbone(pretrained=True)
+
+    net.cuda()
+    net.set_eval()
+
+    all_datasets = get_datasets()
+    for dset_name, dset in all_datasets.items():
+        indices, activations = get_activations(net=net, fc_size=fc_size, data=dset, ssl=True)
         print(f"dset: {dset}  n: {len(dset)}  indices: {indices.shape}  activations: {activations.shape}")
         np.save(file=out_path + f"{dset_name}_activations.npy", arr=activations)
         np.save(file=out_path + f"{dset_name}_indices.npy", arr=indices)
