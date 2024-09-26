@@ -63,6 +63,55 @@ class ForeverDataLoader:
         return ret
 
 
+def weighted_logsumexp(tensor, weights):
+    assert len(tensor.shape) == 2
+    maxes = torch.max(tensor, dim=1, keepdim=True).values
+    tensor -= maxes
+    exps = torch.exp(tensor)
+    weighted_exps = exps * weights
+    weighted_sumexp = torch.sum(weighted_exps, dim=1, keepdim=True)
+    logsumexp = maxes + torch.log(weighted_sumexp)
+    return logsumexp
+
+
+
+def neg_weighted_dcl(features, temp, neg_weights_temp):
+    """Implement the decoupled contrastive loss
+    https://arxiv.org/pdf/2110.06848"""
+    dev = torch.device('cuda:0')
+    batch_size = features.shape[0] / 2
+    labels = torch.cat([torch.arange(batch_size) for _ in range(2)], dim=0)
+    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    labels = labels.to(dev)
+    features = func.normalize(features, dim=1)
+    similarity_matrix = torch.matmul(features, torch.transpose(features, 0, 1))
+
+    # discard the main diagonal from both: labels and similarities matrix
+    mask = torch.eye(labels.shape[0], dtype=torch.bool).to(dev)
+    labels = labels[~mask].view(labels.shape[0], -1).type(torch.uint8)
+    similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+
+    positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+    negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+
+    with torch.no_grad():
+        neg_copy = negatives.clone().detach()
+        neg_distances = 1 - neg_copy
+        neg_weights = torch.softmax(neg_distances / neg_weights_temp, dim=1) * neg_distances.shape[1]
+        # print(neg_weights.shape)
+    # print(negatives)
+    #
+    # print(neg_weights)
+
+    positives = positives / temp
+    negatives = negatives / temp
+
+    pos_loss = -positives
+    neg_loss = weighted_logsumexp(tensor=negatives, weights=neg_weights)
+    total_loss = (pos_loss + neg_loss).mean()
+
+    return total_loss
+
 def decoupled_contrastive_loss(features, temp):
     """Implement the decoupled contrastive loss
     https://arxiv.org/pdf/2110.06848"""
