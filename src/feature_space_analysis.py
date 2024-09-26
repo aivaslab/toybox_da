@@ -47,7 +47,7 @@ SRC_FILES = {
 }
 
 
-def get_dist_matrix(feats, metric):
+def get_dist_matrix(feats, metric, feat_size=512):
     n, dim = feats.size(0), feats.size(1)
     all_dists = torch.zeros((n, n), dtype=torch.float32).cuda()
 
@@ -55,7 +55,7 @@ def get_dist_matrix(feats, metric):
 
     chunks = torch.chunk(feats, 120, dim=0)
     for chunk in chunks:
-        assert chunk.shape == (chunk_size, 512)
+        assert chunk.shape == (chunk_size, feat_size)
 
     for i, chunk_1 in enumerate(chunks):
         for j, chunk_2 in enumerate(chunks):
@@ -116,12 +116,16 @@ def plot_histogram(axis, data, n_bins, x_range, labels, ax_title):
         colors.append(mpl.colormaps[cmap_name].colors[data_idx])
 
     axis.hist(data, stacked=False, bins=n_bins, range=x_range, label=labels, color=colors)
+    mean_vals = []
     for data_idx in range(len(data)):
         partial_data = data[data_idx]
-        axis.axvline(np.mean(partial_data), color=colors[data_idx], linestyle='dashed', linewidth=2)
+        mean_val = np.mean(partial_data)
+        axis.axvline(mean_val, color=colors[data_idx], linestyle='dashed', linewidth=2)
+        mean_vals.append(mean_val)
     axis.legend(loc="upper left", fontsize="large")
     axis.set_title(ax_title)
     axis.tick_params(axis='both', which='both', labelsize=10, labelbottom=True)
+    return mean_vals
 
 
 def gen_intra_domain_dist_histograms(path, metric, title, model="final"):
@@ -183,14 +187,17 @@ def gen_intra_domain_dist_histograms(path, metric, title, model="final"):
     return histogram_fname
 
 
-def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, superclass_split, title):
+def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, superclass_split, title, layer="backbone"):
     fig, axes = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5*len(paths)), sharex=True, sharey=True)
     max_val = -np.inf
     for path in paths:
-        act_path = path + "analysis/final_model/backbone/activations/"
+        act_path = path + f"analysis/final_model/{layer}/activations/"
         for idx, dset in enumerate(["toybox_train", "in12_train"]):
             activations = get_activation_points(path=act_path, dataset=dset)
-            dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            if layer == "backbone":
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            else:
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric, feat_size=128)
             q99 = np.quantile(dist_matrix, q=0.999)
             max_val = max(max_val, q99)
 
@@ -210,10 +217,13 @@ def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, supe
     super_cl_mismatch_mat = ~(cl_match_mat | super_cl_match_mat)
     # print(max_val)
     for path_idx, path in enumerate(paths):
-        act_path = path + "analysis/final_model/backbone/activations/"
+        act_path = path + f"analysis/final_model/{layer}/activations/"
         for idx, dset in enumerate(["toybox_train", "in12_train"]):
             activations = get_activation_points(path=act_path, dataset=dset)
-            dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            if layer == "backbone":
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            else:
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric, feat_size=128)
 
             cl_match_dists = dist_matrix[cl_match_mat]
             cl_mismatch_dists = dist_matrix[cl_mismatch_mat]
@@ -231,8 +241,10 @@ def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, supe
             else:
                 data, labels = [cl_match_dists, cl_mismatch_dists], ["class_match", "class_mismatch"]
 
-            plot_histogram(axis=axes[path_idx][idx], data=data, n_bins=100,
-                           x_range=(0.0, max_val), labels=labels, ax_title=f"{row_titles[path_idx]}-{dset}")
+            mean_vals = plot_histogram(axis=axes[path_idx][idx], data=data, n_bins=100,
+                                       x_range=(0.0, max_val), labels=labels,
+                                       ax_title=f"{row_titles[path_idx]}-{dset}")
+            print(f"{dset}: {mean_vals}, {mean_vals[1] - mean_vals[0]}")
             axes[path_idx][idx].axvline(np.mean(dist_matrix), color='black', linestyle='dashed', linewidth=2)
 
     # histogram_fname = f"{act_path}/intra_domain_dist_histogram_{metric}.jpeg"
@@ -242,7 +254,51 @@ def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, supe
     plt.show()
     plt.close()
     del activations, dist_matrix, cl_match_dists, cl_mismatch_dists, super_cl_match_dists, super_cl_mismatch_dists
-    # return histogram_fname
+
+
+def gen_comparative_all_pairs_hist(paths, metric, row_titles, title, layer="backbone"):
+    fig, axes = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5 * len(paths)), sharex=True, sharey=True)
+    max_val = -np.inf
+    for path in paths:
+        act_path = path + f"analysis/final_model/{layer}/activations/"
+        for idx, dset in enumerate(["toybox_train", "in12_train"]):
+            activations = get_activation_points(path=act_path, dataset=dset)
+            if layer == "backbone":
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            else:
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric,
+                                              feat_size=128)
+            q99 = np.quantile(dist_matrix, q=0.999)
+            max_val = max(max_val, q99)
+
+    # print(max_val)
+    for path_idx, path in enumerate(paths):
+        act_path = path + f"analysis/final_model/{layer}/activations/"
+        for idx, dset in enumerate(["toybox_train", "in12_train"]):
+            activations = get_activation_points(path=act_path, dataset=dset)
+            if layer == "backbone":
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            else:
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric,
+                                              feat_size=128)
+
+            dist_matrix = dist_matrix.flatten()
+            print(dist_matrix.shape)
+            data, labels = [dist_matrix], ["all pairs"]
+
+            mean_vals = plot_histogram(axis=axes[path_idx][idx], data=data, n_bins=100,
+                                       x_range=(0.0, max_val), labels=labels,
+                                       ax_title=f"{row_titles[path_idx]}-{dset}")
+            axes[path_idx][idx].axvline(np.mean(dist_matrix), color='black', linestyle='dashed', linewidth=2)
+
+    # histogram_fname = f"{act_path}/intra_domain_dist_histogram_{metric}.jpeg"
+    fig.tight_layout(pad=2.0, h_pad=1.5)
+    fig.suptitle(title, fontsize='x-large', y=1.0)
+    # plt.savefig(histogram_fname)
+    plt.show()
+    plt.close()
+    del activations, dist_matrix
+# return histogram_fname
 
 
 def plot_and_show_histogram(path, metric, title, model="final"):
