@@ -360,7 +360,7 @@ class DualSSLWithinDomainDistMatchingModelBase:
             src_labels, trgt_labels = src_labels.cuda(), trgt_labels.cuda()
             src_size, trgt_size = src_batch.shape[0], trgt_batch.shape[0]
 
-            if self.combined_fwd_pass:
+            if self.combined_fwd_pass and self.tb_alpha > 0.0:
                 images = torch.cat([src_batch, trgt_batch], dim=0)
                 images = images.cuda()
                 bb_feats, ssl_feats = self.network.forward_w_feats(images)
@@ -368,7 +368,13 @@ class DualSSLWithinDomainDistMatchingModelBase:
                 src_ssl_feats, trgt_ssl_feats = ssl_feats[:src_size], ssl_feats[src_size:]
             else:
                 src_batch, trgt_batch = src_batch.cuda(), trgt_batch.cuda()
-                src_bb_feats, src_ssl_feats = self.network.forward_w_feats(src_batch)
+                if self.tb_alpha == 0.0:
+                    if step == 1 and ep == 1:
+                        print("Using separate fwd passes because tb-alpha=0.0")
+                    with torch.no_grad():
+                        src_bb_feats, src_ssl_feats = self.network.forward_w_feats(src_batch)
+                else:
+                    src_bb_feats, src_ssl_feats = self.network.forward_w_feats(src_batch)
                 trgt_bb_feats, trgt_ssl_feats = self.network.forward_w_feats(trgt_batch)
 
             src_anchor_feats_ssl = src_ssl_feats[:src_size//2]
@@ -551,7 +557,7 @@ class DualSSLWithinDomainDistMatchingModelBase:
                     src_acc = round(100 * src_topk_matches.item() / (src_k * len(dupl_src_labels)), 2)
                     src_neg_acc = round(100 * src_farthest_matches.item() / (src_k * len(dupl_src_labels)), 2)
 
-                    trgt_k = int(self.dist_frac * len(self.in12_feats_queue))
+                    trgt_k = max(int(self.dist_frac * len(self.in12_feats_queue)), 1)
                     # Get top-2 closes image and discard closest (this should be the image itself) for trgt feats
                     trgt_topk_closest_indices = torch.topk(trgt_dist_mat, k=trgt_k+1, largest=True).indices[:, 1:]
                     trgt_topk_labels = self.in12_labels_queue[trgt_topk_closest_indices]

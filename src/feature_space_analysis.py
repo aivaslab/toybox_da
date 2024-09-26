@@ -283,7 +283,6 @@ def gen_comparative_all_pairs_hist(paths, metric, row_titles, title, layer="back
                                               feat_size=128)
 
             dist_matrix = dist_matrix.flatten()
-            print(dist_matrix.shape)
             data, labels = [dist_matrix], ["all pairs"]
 
             mean_vals = plot_histogram(axis=axes[path_idx][idx], data=data, n_bins=100,
