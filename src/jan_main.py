@@ -74,6 +74,8 @@ def get_parser():
     parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
     parser.add_argument("--asymmetric", default=False, action='store_true', help="Use this flag to use asymmetric "
                                                                                  "JAN loss")
+    parser.add_argument("--use-ssl", default=False, action='store_true', help="Use this flag to utilize the ssl "
+                                                                              "features for jan")
     return vars(parser.parse_args())
 
 
@@ -84,6 +86,7 @@ def eval_model(exp_args):
     num_images_per_class = exp_args['images']
     b_size = exp_args['bsize']
     n_workers = exp_args['workers']
+    use_ssl = exp_args['use_ssl']
     logger = utils.create_logger(log_level_str='info', log_file_name="", no_save=True)
 
     # Load Toybox Train dataset and dataloader
@@ -207,6 +210,7 @@ def main():
     save_freq = exp_args['save_freq']
     save_dir = exp_args['save_dir']
     asymmetric = exp_args['asymmetric']
+    use_ssl = exp_args['use_ssl']
     
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
@@ -287,9 +291,16 @@ def main():
         btlnk_wts = load_file['bottleneck'] if 'bottleneck' in load_file.keys() else None
         dropout = load_file['dropout'] if 'dropout' in load_file.keys() else dropout
         cl_wts = load_file['classifier'] if (btlnk_wts is not None and 'classifier' in load_file.keys()) else None
-        net = networks_da.ResNet18JAN(num_classes=12, backbone_weights=bb_wts, bottleneck_weights=btlnk_wts,
-                                      classifier_weights=cl_wts, dropout=dropout, p=dropout_p)
+        if use_ssl:
+            ssl_wts = load_file['ssl_head']
+            net = networks_da.ResNet18SSLJAN(num_classes=12, backbone_weights=bb_wts, bottleneck_weights=btlnk_wts,
+                                             dropout=dropout, ssl_weights=ssl_wts, p=dropout_p,
+                                             classifier_weights=cl_wts)
+        else:
+            net = networks_da.ResNet18JAN(num_classes=12, backbone_weights=bb_wts, bottleneck_weights=btlnk_wts,
+                                          classifier_weights=cl_wts, dropout=dropout, p=dropout_p)
     else:
+        logger.info(f"Loading model weights from ImageNet pretraining...")
         net = networks_da.ResNet18JAN(num_classes=12, pretrained=exp_args['pretrained'], dropout=dropout,
                                       p=dropout_p)
 
@@ -372,7 +383,6 @@ def main():
             pass
             # accs = get_train_test_acc(model=model, loaders=val_loaders, writer=tb_writer, step=ep*steps,
             #                           logger=logger, no_save=no_save)
-
 
         if not no_save and save_freq > 0 and ep % save_freq == 0:
             net.save_model(fpath=tb_path + f"model_epoch_{ep}.pt")

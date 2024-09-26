@@ -159,6 +159,88 @@ class ResNet18Backbone(nn.Module):
                 }
 
 
+class ResNet18SSLLE(nn.Module):
+    """Definition for Supervised network with ResNet18"""
+
+    def __init__(self, pretrained=False, backbone_weights=None, ssl_weights=None, num_classes=12,
+                 classifier_weights=None):
+        super().__init__()
+        self.backbone = ResNet18SSL(pretrained=pretrained, backbone_weights=backbone_weights, ssl_weights=ssl_weights)
+        self.backbone_fc_size = 128
+        self.num_classes = num_classes
+
+        self.classifier_head = nn.Linear(self.backbone_fc_size, self.num_classes)
+
+        if classifier_weights is not None:
+            self.classifier_head.load_state_dict(classifier_weights)
+        else:
+            self.classifier_head.apply(utils.weights_init)
+
+    def count_trainable_parameters(self):
+        """Count the number of trainable parameters"""
+        num_params = sum(p.numel() for p in self.backbone.parameters())
+        num_params_trainable = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
+        num_params += sum(p.numel() for p in self.classifier_head.parameters())
+        num_params_trainable += sum(p.numel() for p in self.classifier_head.parameters() if p.requires_grad)
+        return num_params_trainable, num_params
+
+    def forward(self, x):
+        """Forward method"""
+        feats = self.backbone.forward(x)
+        return self.classifier_head.forward(feats)
+
+    def freeze_train(self):
+        """Unfreeze all weights for training"""
+        for param in self.backbone.parameters():
+            param.requires_grad = True
+        for param in self.classifier_head.parameters():
+            param.requires_grad = True
+
+    def freeze_eval(self):
+        """Freeze all weights for evaluation"""
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        for param in self.classifier_head.parameters():
+            param.requires_grad = False
+
+    def freeze_linear_eval(self):
+        """Freeze all weights for linear eval training"""
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        for param in self.classifier_head.parameters():
+            param.requires_grad = True
+
+    def set_train(self):
+        """Set network in train mode"""
+        self.backbone.train()
+        self.classifier_head.train()
+
+    def set_linear_eval(self):
+        """Set backbone in eval and cl in train mode"""
+        self.backbone.eval()
+        self.classifier_head.train()
+
+    def set_eval(self):
+        """Set network in eval mode"""
+        self.backbone.eval()
+        self.classifier_head.eval()
+
+    def get_params(self) -> dict:
+        """Return a dictionary of the parameters of the model"""
+        return {'backbone_params': self.backbone.parameters(),
+                'classifier_params': self.classifier_head.parameters(),
+                }
+
+    def save_model(self, fpath: str):
+        """Save the model"""
+        save_dict = {
+            'type': self.__class__.__name__,
+            'backbone': self.backbone.model.state_dict(),
+            'classifier': self.classifier_head.state_dict(),
+        }
+        torch.save(save_dict, fpath)
+
+
 class ResNet18Sup(nn.Module):
     """Definition for Supervised network with ResNet18"""
     
