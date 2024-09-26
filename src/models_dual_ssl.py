@@ -218,6 +218,28 @@ class DualSSLWithinDomainDistMatchingModelBase:
         self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
         torch.autograd.set_detect_anomaly(True)
 
+    def get_paired_distance_chunked(self, src_feats, trgt_feats, metric):
+        n1, dim1 = src_feats.size(0), src_feats.size(1)
+        n2, dim2 = trgt_feats.size(0), trgt_feats.size(1)
+        assert dim1 == dim2
+        all_dists = torch.zeros((n1, n2), dtype=torch.float32).cuda()
+        num_chunks = 16
+        src_chunk_size, trgt_chunk_size = n1 // num_chunks, n2 // num_chunks
+        src_chunks, trgt_chunks = torch.chunk(src_feats, num_chunks, dim=0), torch.chunk(trgt_feats, num_chunks, dim=0)
+        for chunk in src_chunks:
+            assert chunk.shape == (src_chunk_size, dim1)
+        for chunk in trgt_chunks:
+            assert chunk.shape == (trgt_chunk_size, dim1)
+
+        for i, chunk_1 in enumerate(src_chunks):
+            for j, chunk_2 in enumerate(trgt_chunks):
+                dist = self.get_paired_distance(src_feats=chunk_1, trgt_feats=chunk_2, metric=metric)
+                assert dist.shape == (src_chunk_size, trgt_chunk_size)
+                all_dists[i * src_chunk_size: i * src_chunk_size + src_chunk_size,
+                j * trgt_chunk_size: j * trgt_chunk_size + trgt_chunk_size] = dist
+
+        return all_dists
+
     @staticmethod
     def get_paired_distance(src_feats, trgt_feats, metric):
         """Returns the distance matrix between the source features and the target features"""
@@ -245,15 +267,26 @@ class DualSSLWithinDomainDistMatchingModelBase:
         with torch.no_grad():
             src_feats_dists = self.get_distance(src_feats, metric=self.div_metric)
             src_feats_dists_reshaped = torch.reshape(src_feats_dists, (-1, 1))
+            num_samples = 1024
+            src_sample_idxs = torch.randperm(src_feats_dists_reshaped.size(0))[:num_samples]
+            src_samples = src_feats_dists_reshaped[src_sample_idxs]
+            # print(src_feats_dists_reshaped.shape, src_samples.shape,
+            #       torch.mean(src_feats_dists_reshaped), torch.std(src_feats_dists_reshaped),
+            #       torch.mean(src_samples), torch.std(src_samples))
 
             trgt_feats_dists = self.get_distance(trgt_feats, metric=self.div_metric)
             trgt_feats_dists_reshaped = torch.reshape(trgt_feats_dists, (-1, 1))
+            trgt_sample_idxs = torch.randperm(trgt_feats_dists_reshaped.size(0))[:num_samples]
+            trgt_samples = trgt_feats_dists_reshaped[trgt_sample_idxs]
+            # print(trgt_feats_dists_reshaped.shape, trgt_samples.shape,
+            #       torch.mean(trgt_feats_dists_reshaped), torch.std(trgt_feats_dists_reshaped),
+            #       torch.mean(trgt_samples), torch.std(trgt_samples))
 
-            div_dist_emd_loss = self.emd_dist_loss(src_feats_dists_reshaped, trgt_feats_dists_reshaped)
+            div_dist_emd_loss = self.emd_dist_loss(src_samples, trgt_samples)
             if self.ind_mmd_loss:
                 div_dist_mmd_loss = self.mmd_dist_loss(src_feats_dists, trgt_feats_dists)
             else:
-                div_dist_mmd_loss = self.mmd_dist_loss((src_feats_dists_reshaped,), (trgt_feats_dists_reshaped,))
+                div_dist_mmd_loss = self.mmd_dist_loss((src_samples,), (trgt_samples,))
             tracking_vars["div_loss_emd_total"] += div_dist_emd_loss.item()
             tracking_vars["div_loss_mmd_total"] += div_dist_mmd_loss.item()
             tracking_vars["src_dist_total"] += torch.mean(src_feats_dists).item()
@@ -414,7 +447,7 @@ class DualSSLWithinDomainDistMatchingModelBase:
                 # Track within-batch accuracy using KNNs
                 # NOTE: This only considers the anchor images. Positive pairs are not considered for KNN acc.
                 # calculation
-                with torch.no_grad():
+                with (torch.no_grad()):
                     dupl_src_labels = torch.cat([src_labels for _ in range(2)], dim=0)
 
                     if self.tb_feats_queue is None:
@@ -429,13 +462,14 @@ class DualSSLWithinDomainDistMatchingModelBase:
                                                 -self.queue_size:, :]
                         self.in12_labels_queue = torch.cat((self.in12_labels_queue, trgt_labels))[-self.queue_size:]
                     # print(len(self.tb_feats_queue), len(self.in12_feats_queue))
-                    src_dist_mat = self.get_paired_distance(src_feats=src_anchor_feats, trgt_feats=self.tb_feats_queue,
-                                                            metric="cosine")
-                    trgt_dist_mat = self.get_paired_distance(src_feats=trgt_anchor_feats,
-                                                             trgt_feats=self.in12_feats_queue,
-                                                             metric="cosine")
+                    src_dist_mat = self.get_paired_distance_chunked(src_feats=src_anchor_feats,
+                                                                    trgt_feats=self.tb_feats_queue,
+                                                                    metric="cosine")
+                    trgt_dist_mat = self.get_paired_distance_chunked(src_feats=trgt_anchor_feats,
+                                                                     trgt_feats=self.in12_feats_queue,
+                                                                     metric="cosine")
 
-                    if step == steps and len(self.in12_feats_queue) > 200:
+                    if step == steps and len(self.in12_feats_queue) > 10000:
                         acc_log_strs = ["Accs:"]
                         src_accs, trgt_accs, src_neg_accs, trgt_neg_accs, dist_fracs = [], [], [], [], []
                         for dist_frac in [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]:
@@ -534,49 +568,53 @@ class DualSSLWithinDomainDistMatchingModelBase:
                     trgt_acc = round(100 * trgt_topk_matches.item() / (trgt_k * len(trgt_labels)), 2)
                     trgt_neg_acc = round(100 * trgt_farthest_matches.item() / (trgt_k * len(trgt_labels)), 2)
 
-                    trgt_q_dist_mat = self.get_paired_distance(src_feats=self.in12_feats_queue,
-                                                               trgt_feats=self.in12_feats_queue,
-                                                               metric="cosine")
-
-                    # Calculate mean within-class and across class distances for source queue
-                    src_q_dist_mat = self.get_paired_distance(src_feats=self.tb_feats_queue,
-                                                              trgt_feats=self.tb_feats_queue,
-                                                              metric="cosine")
-
-                    src_q_cl_match_matrix = (self.tb_labels_queue.unsqueeze(1) ==
-                                             self.tb_labels_queue.unsqueeze(0)).int()
-                    src_q_cl_mismatch_matrix = torch.ones_like(src_q_cl_match_matrix) - src_q_cl_match_matrix
-                    assert torch.sum(src_q_cl_match_matrix) + torch.sum(src_q_cl_mismatch_matrix) == \
-                           src_q_cl_match_matrix.shape[0] * src_q_cl_match_matrix.shape[1]
-
-                    tb_cl_match_dists = src_q_dist_mat * src_q_cl_match_matrix
-                    tb_cl_mismatch_dists = src_q_dist_mat * src_q_cl_mismatch_matrix
-
-                    tb_cl_match_ave_dist = torch.sum(tb_cl_match_dists) / torch.sum(src_q_cl_match_matrix)
-                    tb_cl_mismatch_ave_dist = torch.sum(tb_cl_mismatch_dists) / torch.sum(src_q_cl_mismatch_matrix)
-
-                    # Calculate mean within-class and across class distances for source queue
-                    trgt_q_cl_match_matrix = (self.in12_labels_queue.unsqueeze(1) ==
-                                              self.in12_labels_queue.unsqueeze(0)).int()
-                    trgt_q_cl_mismatch_matrix = torch.ones_like(trgt_q_cl_match_matrix) - trgt_q_cl_match_matrix
-                    assert torch.sum(trgt_q_cl_match_matrix) + torch.sum(trgt_q_cl_mismatch_matrix) == \
-                           trgt_q_cl_match_matrix.shape[0] * trgt_q_cl_match_matrix.shape[1]
-
-                    in12_cl_match_dists = trgt_q_dist_mat * trgt_q_cl_match_matrix
-                    in12_cl_mismatch_dists = trgt_q_dist_mat * trgt_q_cl_mismatch_matrix
-
-                    in12_cl_match_ave_dist = torch.sum(in12_cl_match_dists) / torch.sum(trgt_q_cl_match_matrix)
-                    in12_cl_mismatch_ave_dist = torch.sum(in12_cl_mismatch_dists) / torch.sum(trgt_q_cl_mismatch_matrix)
                     src_acc_total += src_acc
                     src_neg_acc_total += src_neg_acc
                     trgt_acc_total += trgt_acc
                     trgt_neg_acc_total += trgt_neg_acc
-                logger_strs.append(f"A1:{src_acc_total/num_batches:.2f} A2:{trgt_acc_total/num_batches:.2f} "
-                                   f"A3:{src_neg_acc_total/num_batches:.2f} A4:{trgt_neg_acc_total/num_batches:.2f}")
-                logger_strs.append(
-                    f"D:[{tb_cl_match_ave_dist:.2f} {tb_cl_mismatch_ave_dist:.2f} "
-                    f"{in12_cl_match_ave_dist:.2f} {in12_cl_mismatch_ave_dist:.2f}]"
-                )
+                    logger_strs.append(f"A1:{src_acc_total / num_batches:.2f} A2:{trgt_acc_total / num_batches:.2f} "
+                                       f"A3:{src_neg_acc_total / num_batches:.2f} "
+                                       f"A4:{trgt_neg_acc_total / num_batches:.2f}")
+                    if step == steps:
+                        trgt_q_dist_mat = self.get_paired_distance_chunked(src_feats=self.in12_feats_queue,
+                                                                           trgt_feats=self.in12_feats_queue,
+                                                                           metric="cosine")
+
+                        # Calculate mean within-class and across class distances for source queue
+                        src_q_dist_mat = self.get_paired_distance_chunked(src_feats=self.tb_feats_queue,
+                                                                          trgt_feats=self.tb_feats_queue,
+                                                                          metric="cosine")
+
+                        src_q_cl_match_matrix = (self.tb_labels_queue.unsqueeze(1) ==
+                                                 self.tb_labels_queue.unsqueeze(0)).int()
+                        src_q_cl_mismatch_matrix = torch.ones_like(src_q_cl_match_matrix) - src_q_cl_match_matrix
+                        assert torch.sum(src_q_cl_match_matrix) + torch.sum(src_q_cl_mismatch_matrix) == \
+                               src_q_cl_match_matrix.shape[0] * src_q_cl_match_matrix.shape[1]
+
+                        tb_cl_match_dists = src_q_dist_mat * src_q_cl_match_matrix
+                        tb_cl_mismatch_dists = src_q_dist_mat * src_q_cl_mismatch_matrix
+
+                        tb_cl_match_ave_dist = torch.sum(tb_cl_match_dists) / torch.sum(src_q_cl_match_matrix)
+                        tb_cl_mismatch_ave_dist = torch.sum(tb_cl_mismatch_dists) / torch.sum(src_q_cl_mismatch_matrix)
+
+                        # Calculate mean within-class and across class distances for source queue
+                        trgt_q_cl_match_matrix = (self.in12_labels_queue.unsqueeze(1) ==
+                                                  self.in12_labels_queue.unsqueeze(0)).int()
+                        trgt_q_cl_mismatch_matrix = torch.ones_like(trgt_q_cl_match_matrix) - trgt_q_cl_match_matrix
+                        assert torch.sum(trgt_q_cl_match_matrix) + torch.sum(trgt_q_cl_mismatch_matrix) == \
+                               trgt_q_cl_match_matrix.shape[0] * trgt_q_cl_match_matrix.shape[1]
+
+                        in12_cl_match_dists = trgt_q_dist_mat * trgt_q_cl_match_matrix
+                        in12_cl_mismatch_dists = trgt_q_dist_mat * trgt_q_cl_mismatch_matrix
+
+                        in12_cl_match_ave_dist = torch.sum(in12_cl_match_dists) / torch.sum(trgt_q_cl_match_matrix)
+                        in12_cl_mismatch_ave_dist = \
+                            torch.sum(in12_cl_mismatch_dists) / torch.sum(trgt_q_cl_mismatch_matrix)
+
+                        logger_strs.append(
+                            f"D:[{tb_cl_match_ave_dist:.2f} {tb_cl_mismatch_ave_dist:.2f} "
+                            f"{in12_cl_match_ave_dist:.2f} {in12_cl_mismatch_ave_dist:.2f}]"
+                        )
                 tb_scalar_dicts["knn_queue"] = {
                     'tb_queue_size': len(self.tb_labels_queue),
                     'in12_queue_size': len(self.in12_labels_queue),
