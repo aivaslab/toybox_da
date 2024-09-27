@@ -199,7 +199,7 @@ class DualSSLWithinDomainDistMatchingModelBase:
         self.use_bb_mmd = kwargs["use_bb_mmd"]
         self.dist_frac = 0.05
         self.neg_dcl_weight_min = 0.1
-        self.neg_dcl_weight_max = 10.0
+        self.neg_dcl_weight_max = 100.0
 
         self.emd_dist_loss = mmd_util.EMD1DLoss()
         if self.ind_mmd_loss:
