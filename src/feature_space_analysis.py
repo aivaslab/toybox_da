@@ -187,11 +187,14 @@ def gen_intra_domain_dist_histograms(path, metric, title, model="final"):
     return histogram_fname
 
 
-def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, superclass_split, title, layer="backbone"):
+def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, superclass_split, title,
+                                                 models=None, layer="backbone"):
+    if models is None:
+        models = ["final_model"] * len(paths)
     fig, axes = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5*len(paths)), sharex=True, sharey=True)
     max_val = -np.inf
-    for path in paths:
-        act_path = path + f"analysis/final_model/{layer}/activations/"
+    for path_idx, path in enumerate(paths):
+        act_path = path + f"analysis/{models[path_idx]}/{layer}/activations/"
         for idx, dset in enumerate(["toybox_train", "in12_train"]):
             activations = get_activation_points(path=act_path, dataset=dset)
             if layer == "backbone":
@@ -217,7 +220,7 @@ def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, supe
     super_cl_mismatch_mat = ~(cl_match_mat | super_cl_match_mat)
     # print(max_val)
     for path_idx, path in enumerate(paths):
-        act_path = path + f"analysis/final_model/{layer}/activations/"
+        act_path = path + f"analysis/{models[path_idx]}/{layer}/activations/"
         for idx, dset in enumerate(["toybox_train", "in12_train"]):
             activations = get_activation_points(path=act_path, dataset=dset)
             if layer == "backbone":
@@ -256,12 +259,14 @@ def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, supe
     del activations, dist_matrix, cl_match_dists, cl_mismatch_dists, super_cl_match_dists, super_cl_mismatch_dists
 
 
-def gen_comparative_size_ratio(paths, metric, row_titles, title, layer="backbone"):
+def gen_comparative_size_ratio(paths, metric, row_titles, title, models=None, layer="backbone"):
+    if models is None:
+        models = ["final_model"] * len(paths)
     fig1, axes1 = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5*len(paths)), sharex=True, sharey=True)
     fig2, axes2 = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5*len(paths)), sharex=True, sharey=True)
     max_val = -np.inf
-    for path in paths:
-        act_path = path + f"analysis/final_model/{layer}/activations/"
+    for path_idx, path in enumerate(paths):
+        act_path = path + f"analysis/{models[path_idx]}/{layer}/activations/"
         for idx, dset in enumerate(["toybox_train", "in12_train"]):
             activations = get_activation_points(path=act_path, dataset=dset)
             if layer == "backbone":
@@ -284,7 +289,7 @@ def gen_comparative_size_ratio(paths, metric, row_titles, title, layer="backbone
 
     # print(max_val)
     for path_idx, path in enumerate(paths):
-        act_path = path + f"analysis/final_model/{layer}/activations/"
+        act_path = path + f"analysis/{models[path_idx]}/{layer}/activations/"
         for idx, dset in enumerate(["toybox_train", "in12_train"]):
             activations = get_activation_points(path=act_path, dataset=dset)
             if layer == "backbone":
@@ -346,11 +351,13 @@ def gen_comparative_size_ratio(paths, metric, row_titles, title, layer="backbone
     del activations, dist_matrix, cl_match_dists, cl_mismatch_dists
 
 
-def gen_comparative_all_pairs_hist(paths, metric, row_titles, title, layer="backbone"):
+def gen_comparative_all_pairs_hist(paths, metric, row_titles, title, layer="backbone", models=None):
+    if models is None:
+        models = ["final_model"] * len(paths)
     fig, axes = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5 * len(paths)), sharex=True, sharey=True)
     max_val = -np.inf
-    for path in paths:
-        act_path = path + f"analysis/final_model/{layer}/activations/"
+    for path_idx, path in enumerate(paths):
+        act_path = path + f"analysis/{models[path_idx]}/{layer}/activations/"
         for idx, dset in enumerate(["toybox_train", "in12_train"]):
             activations = get_activation_points(path=act_path, dataset=dset)
             if layer == "backbone":
@@ -363,7 +370,7 @@ def gen_comparative_all_pairs_hist(paths, metric, row_titles, title, layer="back
 
     # print(max_val)
     for path_idx, path in enumerate(paths):
-        act_path = path + f"analysis/final_model/{layer}/activations/"
+        act_path = path + f"analysis/{models[path_idx]}/{layer}/activations/"
         for idx, dset in enumerate(["toybox_train", "in12_train"]):
             activations = get_activation_points(path=act_path, dataset=dset)
             if layer == "backbone":
