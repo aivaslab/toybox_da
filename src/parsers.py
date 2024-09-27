@@ -98,5 +98,7 @@ def get_dual_ssl_class_mmd_v1_parser():
                                                                                         "alpha")
     parser.add_argument("--use-bb-mmd", default=False, action='store_true', help="Use this option to use mmd "
                                                                                  "loss on backbone feats")
+    parser.add_argument("--skip-epochs", "-se", default=0, type=int, help="Set the number of epochs of training to "
+                                                                          "skip")
     # parser.add_argument("--knn-dist-acc", default=0.05, type=float, )
     return parser

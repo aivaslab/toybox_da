@@ -80,6 +80,7 @@ def run_training(exp_args):
     div_alpha_start = exp_args['div_alpha_start']
     ind_mmd_loss = exp_args['ind_mmd_loss']
     use_bb_mmd = exp_args['use_bb_mmd']
+    skip_epochs = exp_args['skip_epochs']
 
     tb_transform_train = tb_in12_transforms.get_ssl_transform(dset="toybox")
     tb_loader_train = get_dataloader(dset="toybox", batch_size=b_size, ssl_type=tb_ssl_type,
@@ -146,10 +147,15 @@ def run_training(exp_args):
             net.save_model(fpath=tb_path + "model_epoch_0.pt")
 
     for ep in range(1, num_epochs + 1):
-        ssl_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
-                        ep=ep, ep_total=num_epochs, writer=tb_writer)
-        if not no_save and save_freq > 0 and ep % save_freq == 0:
-            net.save_model(fpath=tb_path + f"model_epoch_{ep}.pt")
+        if ep <= skip_epochs:
+            for step in range(steps):
+                optimizer.step()
+                combined_scheduler.step()
+        else:
+            ssl_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
+                            ep=ep, ep_total=num_epochs, writer=tb_writer)
+            if not no_save and save_freq > 0 and ep % save_freq == 0:
+                net.save_model(fpath=tb_path + f"model_epoch_{ep}.pt")
 
     if not no_save:
         net.save_model(fpath=tb_path + "final_model.pt")
