@@ -256,6 +256,96 @@ def gen_comparative_intra_domain_dist_histograms(paths, metric, row_titles, supe
     del activations, dist_matrix, cl_match_dists, cl_mismatch_dists, super_cl_match_dists, super_cl_mismatch_dists
 
 
+def gen_comparative_size_ratio(paths, metric, row_titles, title, layer="backbone"):
+    fig1, axes1 = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5*len(paths)), sharex=True, sharey=True)
+    fig2, axes2 = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5*len(paths)), sharex=True, sharey=True)
+    max_val = -np.inf
+    for path in paths:
+        act_path = path + f"analysis/final_model/{layer}/activations/"
+        for idx, dset in enumerate(["toybox_train", "in12_train"]):
+            activations = get_activation_points(path=act_path, dataset=dset)
+            if layer == "backbone":
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            else:
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric, feat_size=128)
+            q99 = np.quantile(dist_matrix, q=0.999)
+            max_val = max(max_val, q99)
+
+    cl_match_mat = np.eye(len(TB_CLASSES), dtype=bool)
+    super_cl_match_mat = np.zeros((12, 12), dtype=bool)
+    for i, cl_1 in enumerate(TB_CLASSES):
+        for j, cl_2 in enumerate(TB_CLASSES):
+            if cl_1 != cl_2 and SUPER_CATEGORIES[cl_1] == SUPER_CATEGORIES[cl_2]:
+                super_cl_match_mat[i][j] = True
+
+    cl_match_mat = np.repeat(cl_match_mat, 1500, axis=1)
+    cl_match_mat = np.repeat(cl_match_mat, 1500, axis=0)
+    cl_mismatch_mat = ~cl_match_mat
+
+    # print(max_val)
+    for path_idx, path in enumerate(paths):
+        act_path = path + f"analysis/final_model/{layer}/activations/"
+        for idx, dset in enumerate(["toybox_train", "in12_train"]):
+            activations = get_activation_points(path=act_path, dataset=dset)
+            if layer == "backbone":
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric)
+            else:
+                dist_matrix = get_dist_matrix(feats=torch.from_numpy(activations).cuda(), metric=metric, feat_size=128)
+
+            cl_match_dists = dist_matrix[cl_match_mat]
+            cl_mismatch_dists = dist_matrix[cl_mismatch_mat]
+            assert len(cl_match_dists) == 1500 * 1500 * 12
+            assert len(cl_mismatch_dists) == 1500 * 1500 * 11 * 12
+
+            match_hist, match_bin_edges = np.histogram(cl_match_dists, bins=np.arange(0, max_val, max_val/100))
+            mismatch_hist, mismatch_bin_edges = np.histogram(cl_mismatch_dists, bins=np.arange(0, max_val, max_val/100))
+            ratio = []
+            tot_ratio = []
+            total_dists = sum(match_hist) + sum(mismatch_hist)
+            cum_sum = 0
+            for i in range(len(match_hist)):
+                match_num, mismatch_num = match_hist[i], mismatch_hist[i]
+                if mismatch_num == 0 and match_num == 0:
+                    ratio.append(0)
+                else:
+                    ratio.append(match_num/(match_num + mismatch_num))
+                cum_sum += match_num + mismatch_num
+                tot_ratio.append(cum_sum/total_dists)
+            axes1[path_idx][idx].plot(match_bin_edges[:-1], ratio, label="wc/ac ratio")
+            axes1[path_idx][idx].plot(match_bin_edges[:-1], tot_ratio, label="cumulative points")
+            axes1[path_idx][idx].set_title(f"{row_titles[path_idx]}-{dset}")
+            axes1[path_idx][idx].legend(loc="center right", fontsize="large")
+            axes1[path_idx][idx].set_yticks(np.arange(0, 1.05, 0.1))
+            axes1[path_idx][idx].set_xticks(np.arange(0, 1.05, 0.1))
+            axes1[path_idx][idx].tick_params(axis='both', which='both', labelsize=10, labelbottom=True)
+            axes1[path_idx][idx].grid(which='major', axis='both', linestyle='--', linewidth=2)
+            axes1[path_idx][idx].grid(which='minor', axis='both', linestyle='--', linewidth=1)
+
+            axes2[path_idx][idx].plot(tot_ratio, ratio)
+            axes2[path_idx][idx].set_yscale('log')
+            axes2[path_idx][idx].set_xscale('log')
+            axes2[path_idx][idx].set_xlabel("cumulative points")
+            axes2[path_idx][idx].set_ylabel("wc/ac ratio")
+            axes2[path_idx][idx].set_title(f"{row_titles[path_idx]}-{dset}")
+            # axes2[path_idx][idx].set_yticks(np.arange(0, 1.05, 0.1))
+            # axes2[path_idx][idx].set_xticks(np.arange(0, 1.05, 0.1))
+            axes2[path_idx][idx].tick_params(axis='both', which='both', labelsize=10, labelbottom=True)
+            axes2[path_idx][idx].grid(which='major', axis='both', linestyle='--', linewidth=2)
+            axes2[path_idx][idx].grid(which='minor', axis='both', linestyle='--', linewidth=1)
+            # print(len(match_hist), len(match_bin_edges), len(mismatch_hist), len(mismatch_bin_edges))
+
+    # histogram_fname = f"{act_path}/intra_domain_dist_histogram_{metric}.jpeg"
+    fig1.tight_layout(pad=2.0, h_pad=1.5)
+    fig1.suptitle(title, fontsize='x-large', y=1.0)
+
+    fig2.tight_layout(pad=2.0, h_pad=1.5)
+    fig2.suptitle(title, fontsize='x-large', y=1.0)
+    # plt.savefig(histogram_fname)
+    plt.show()
+    plt.close()
+    del activations, dist_matrix, cl_match_dists, cl_mismatch_dists
+
+
 def gen_comparative_all_pairs_hist(paths, metric, row_titles, title, layer="backbone"):
     fig, axes = plt.subplots(nrows=len(paths), ncols=2, figsize=(16, 4.5 * len(paths)), sharex=True, sharey=True)
     max_val = -np.inf
