@@ -791,19 +791,20 @@ class DualSSLWithinDomainSplitDistMatchingModel(DualSSLWithinDomainSplitDistMatc
         return self.div_alpha * frac
 
     def calculate_domain_dist_matching_loss(self, src_feats, trgt_feats):
+        k = self.num_split_images
         src_feats_dists = self.get_distance(src_feats, metric=self.div_metric)
         trgt_feats_dists = self.get_distance(trgt_feats, metric=self.div_metric)
 
         if self.div_metric == "euclidean":
-            src_closest_dists = torch.topk(src_feats_dists, k=2, largest=False).values[:, 1]
-            src_farthest_dists = torch.topk(src_feats_dists, k=1, largest=True).values[:, 0]
-            trgt_closest_dists = torch.topk(trgt_feats_dists, k=2, largest=False).values[:, 1]
-            trgt_farthest_dists = torch.topk(trgt_feats_dists, k=1, largest=True).values[:, 0]
+            src_closest_dists = torch.topk(src_feats_dists, k=k+1, largest=False).values[:, 1:]
+            src_farthest_dists = torch.topk(src_feats_dists, k=k, largest=True).values[:, 0:]
+            trgt_closest_dists = torch.topk(trgt_feats_dists, k=k+1, largest=False).values[:, 1:]
+            trgt_farthest_dists = torch.topk(trgt_feats_dists, k=k, largest=True).values[:, 0:]
         else:
-            src_closest_dists = torch.topk(src_feats_dists, k=2, largest=True).values[:, 1]
-            src_farthest_dists = torch.topk(src_feats_dists, k=1, largest=False).values[:, 0]
-            trgt_closest_dists = torch.topk(trgt_feats_dists, k=2, largest=True).values[:, 1]
-            trgt_farthest_dists = torch.topk(trgt_feats_dists, k=1, largest=False).values[:, 0]
+            src_closest_dists = torch.topk(src_feats_dists, k=k+1, largest=True).values[:, 1:]
+            src_farthest_dists = torch.topk(src_feats_dists, k=k, largest=False).values[:, 0:]
+            trgt_closest_dists = torch.topk(trgt_feats_dists, k=k+1, largest=True).values[:, 1:]
+            trgt_farthest_dists = torch.topk(trgt_feats_dists, k=k, largest=False).values[:, 0:]
 
         if self.asymmetric:
             src_closest_dists = torch.reshape(src_closest_dists, (-1, 1)).clone().detach()
@@ -813,6 +814,7 @@ class DualSSLWithinDomainSplitDistMatchingModel(DualSSLWithinDomainSplitDistMatc
             src_farthest_dists = torch.reshape(src_farthest_dists, (-1, 1))
         trgt_closest_dists = torch.reshape(trgt_closest_dists, (-1, 1))
         trgt_farthest_dists = torch.reshape(trgt_farthest_dists, (-1, 1))
+        # print(src_closest_dists.shape, trgt_closest_dists.shape)
 
         if self.use_ot:
             closest_div_dist_loss = self.emd_dist_loss(src_closest_dists, trgt_closest_dists)
