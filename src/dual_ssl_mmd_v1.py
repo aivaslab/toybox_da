@@ -101,7 +101,8 @@ def run_training(exp_args):
     # logger.info(utils.online_mean_and_sd(tb_loader_train), utils.online_mean_and_sd(in12_loader_train))
 
     if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
-        load_file_path = exp_args['load_path'] + "final_model.pt"
+        load_file_path = exp_args['load_path'] + f"{exp_args['model_name']}"
+        assert os.path.isfile(load_file_path)
         load_file = torch.load(load_file_path)
         logger.info(f"Loading weights from {load_file_path} ({load_file['type']})")
 
