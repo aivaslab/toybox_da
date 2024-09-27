@@ -15,6 +15,8 @@ def get_default_parser():
                                                                                   "experiment")
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--model-name", default="final_model.pt", type=str, help="Name of the model to load weights "
+                                                                                 "from")
     parser.add_argument("--no-save", action='store_true', default=False, help="Use this option to disable saving")
     parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
     parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of saving models")
