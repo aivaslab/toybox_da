@@ -19,7 +19,7 @@ def get_default_parser():
                                                                                  "from")
     parser.add_argument("--no-save", action='store_true', default=False, help="Use this option to disable saving")
     parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
-    parser.add_argument("--save-freq", default=-1, type=int, help="Frequency of saving models")
+    parser.add_argument("--save-freq", "-sf", default=-1, type=int, help="Frequency of saving models")
     return parser
 
 
@@ -61,9 +61,9 @@ def get_dual_ssl_class_mmd_v1_parser():
                         help="Use this flag to choose ssl loss for toybox")
     parser.add_argument("--in12-ssl-loss", choices=["simclr", "dcl", "nwdcl"], default="dcl",
                         help="Use this flag to choose ssl loss for in12")
-    parser.add_argument("--tb-alpha", "-tba", default=1.0, type=float, help="Weight of TB contrastive loss in total "
+    parser.add_argument("--tb-alpha", "-tba", default=0.25, type=float, help="Weight of TB contrastive loss in total "
                                                                             "loss")
-    parser.add_argument("--div-alpha", default=1.0, type=float, help="Weight of orientation loss in total loss")
+    parser.add_argument("--div-alpha", "-da", default=1.0, type=float, help="Weight of orientation loss in total loss")
     parser.add_argument("--in12-alpha", "-in12a", default=1.0, type=float, help="Weight of IN-12 contrastive loss in "
                                                                                 "total loss")
     parser.add_argument("--tb-ssl-type", "-tbssl", default="object", choices=['self', 'transform', 'object', 'class'],
@@ -73,8 +73,8 @@ def get_dual_ssl_class_mmd_v1_parser():
     parser.add_argument("--ignore-div-loss", default=False, action='store_true', help="Use this flag to not use "
                                                                                       "divergence loss for "
                                                                                       "training")
-    parser.add_argument("--asymmetric", action='store_true', default=False, help="Use this flag to select asymmetric "
-                                                                                 "mmd loss during training")
+    parser.add_argument("--asymmetric", "-asym", action='store_true', default=False,
+                        help="Use this flag to select asymmetric mmd loss during training")
     parser.add_argument("--use-ot", default=False, action='store_true', help="Use this flag to use OT-based loss "
                                                                              "instead of MMD")
     parser.add_argument("--ind-mmd-loss", default=False, action='store_true', help="Use this flag to match profiles "
@@ -84,23 +84,23 @@ def get_dual_ssl_class_mmd_v1_parser():
     parser.add_argument("--separate-forward-pass", default=False, action='store_true', help="Use this flag to have "
                                                                                             "separate forward passes "
                                                                                             "for the two datasets")
-    parser.add_argument("--track-knn-acc", default=False, action='store_true', help="Use this flag to track "
-                                                                                    "within-batch accuracy with knn")
-    parser.add_argument("--queue-factor", "-qf", default=1, type=int, help="Set the size of the knn queue wrt the "
+    parser.add_argument("--ignore-knn-acc", default=False, action='store_true', help="Use this flag to turn off "
+                                                                                     "within-batch knn acc tracking")
+    parser.add_argument("--queue-factor", "-qf", default=20, type=int, help="Set the size of the knn queue wrt the "
                                                                            "batch size")
-    parser.add_argument("--split-div-loss", default=False, action='store_true', help="Use this flag to compute div "
-                                                                                     "loss using closest and farthest "
-                                                                                     "distances instead of all "
-                                                                                     "distances")
-    parser.add_argument("--split-div-type", choices=["closest", "farthest", "both"], default="both", type=str)
-    parser.add_argument("--num-split-images", type=int, default=1,
+    parser.add_argument("--split-div-loss", "-split-div", default=False, action='store_true',
+                        help="Use this flag to compute div loss using closest and farthest "
+                             "distances instead of all distances")
+    parser.add_argument("--split-div-type", "-split-div-type",  choices=["closest", "farthest", "both"], default="both",
+                        type=str)
+    parser.add_argument("--num-split-images", "-num-split", type=int, default=1,
                         help="Number of images to consider for split div loss")
     parser.add_argument("--div-alpha-type", choices=["fixed", "cosine", "linear"], help="Schedule for distribution "
                                                                                         "alpha")
-    parser.add_argument("--div-alpha-start", default=50, type=int, help="Schedule for distribution "
-                                                                                        "alpha")
-    parser.add_argument("--use-bb-mmd", default=False, action='store_true', help="Use this option to use mmd "
-                                                                                 "loss on backbone feats")
+    parser.add_argument("--div-alpha-start", "-div-start", default=50, type=int, help="Schedule for distribution "
+                                                                                      "alpha")
+    parser.add_argument("--use-ssl-mmd", default=False, action='store_true', help="Use this option to use mmd "
+                                                                                  "loss on ssl head feats")
     parser.add_argument("--skip-epochs", "-se", default=0, type=int, help="Set the number of epochs of training to "
                                                                           "skip")
     # parser.add_argument("--knn-dist-acc", default=0.05, type=float, )
