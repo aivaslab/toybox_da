@@ -774,6 +774,8 @@ class DualSSLWithinDomainSplitDistMatchingModel(DualSSLWithinDomainSplitDistMatc
         self.div_alpha_schedule = kwargs["div_alpha_schedule"]
         self.div_alpha_start = kwargs["div_alpha_start"]
         self.div_alpha = kwargs["div_alpha"]
+        self.split_div_type = kwargs["split_div_type"]
+        assert self.split_div_type.lower() in ["farthest", "closest", "both"]
         super().__init__(**kwargs)
 
     def get_div_alpha(self, step, steps, ep, ep_total):
@@ -816,11 +818,18 @@ class DualSSLWithinDomainSplitDistMatchingModel(DualSSLWithinDomainSplitDistMatc
         trgt_farthest_dists = torch.reshape(trgt_farthest_dists, (-1, 1))
         # print(src_closest_dists.shape, trgt_closest_dists.shape)
 
-        if self.use_ot:
-            closest_div_dist_loss = self.emd_dist_loss(src_closest_dists, trgt_closest_dists)
-            farthest_div_dist_loss = self.emd_dist_loss(src_farthest_dists, trgt_farthest_dists)
-        else:
-            closest_div_dist_loss = self.mmd_dist_loss((src_closest_dists,), (trgt_closest_dists,))
-            farthest_div_dist_loss = self.mmd_dist_loss((src_farthest_dists,), (trgt_farthest_dists,))
+        closest_div_dist_loss = torch.tensor([0.0], dtype=trgt_closest_dists.dtype).cuda()
+        farthest_div_dist_loss = torch.tensor([0.0], dtype=trgt_closest_dists.dtype).cuda()
+
+        if self.split_div_type != "farthest":
+            if self.use_ot:
+                closest_div_dist_loss = self.emd_dist_loss(src_closest_dists, trgt_closest_dists)
+            else:
+                closest_div_dist_loss = self.mmd_dist_loss((src_closest_dists,), (trgt_closest_dists,))
+        if self.split_div_type != "closest":
+            if self.use_ot:
+                farthest_div_dist_loss = self.emd_dist_loss(src_farthest_dists, trgt_farthest_dists)
+            else:
+                farthest_div_dist_loss = self.mmd_dist_loss((src_farthest_dists,), (trgt_farthest_dists,))
 
         return closest_div_dist_loss + farthest_div_dist_loss
