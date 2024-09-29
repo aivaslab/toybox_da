@@ -161,7 +161,8 @@ def main():
                                                 num_images_per_class=num_images_per_class,
                                                 )
         logger.debug(f"Dataset: {src_data_train}  Size: {len(src_data_train)}")
-        src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers)
+        src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
+                                                persistent_workers=True, pin_memory=True, drop_last=True)
         
         src_transform_test = transforms.Compose([transforms.ToPILImage(),
                                                  transforms.Resize((224, 224)),
@@ -171,7 +172,8 @@ def main():
         
         src_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(), train=False, transform=src_transform_test,
                                                hypertune=hypertune)
-        src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
+        src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers,
+                                               persistent_workers=True, pin_memory=True)
         
     else:
         src_transform_train = transforms.Compose([transforms.ToPILImage(),
@@ -188,7 +190,8 @@ def main():
                                                   ])
         src_data_train = datasets.DatasetIN12(train=True, transform=src_transform_train, hypertune=hypertune)
         logger.debug(f"Dataset: {src_data_train}  Size: {len(src_data_train)}")
-        src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers)
+        src_loader_train = torchdata.DataLoader(src_data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
+                                                persistent_workers=True, pin_memory=True, drop_last=True)
     
         src_transform_test = transforms.Compose([transforms.ToPILImage(),
                                                  transforms.Resize((224, 224)),
@@ -197,7 +200,8 @@ def main():
                                                                       std=datasets.IN12_STD)])
     
         src_data_test = datasets.DatasetIN12(train=False, transform=src_transform_test, hypertune=hypertune)
-        src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
+        src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers,
+                                               persistent_workers=True, pin_memory=True)
     
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
