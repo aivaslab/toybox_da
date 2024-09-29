@@ -58,6 +58,7 @@ def get_parser():
     parser.add_argument("-wd", "--wd", default=1e-5, type=float, help="Weight decay for optimizer")
     parser.add_argument("--instances", default=-1, type=int, help="Set number of toybox instances to train on")
     parser.add_argument("--images", default=1000, type=int, help="Set number of images per class to train on")
+    parser.add_argument("--data-seed", default=-1, type=int, help="Seed for running experiments")
     parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
     parser.add_argument("--log", choices=["debug", "info", "warning", "error", "critical"], default="info", type=str)
     parser.add_argument("--pretrained", default=False, action='store_true',
@@ -191,7 +192,7 @@ def eval_model(exp_args):
 def main():
     """Main method"""
     exp_args = get_parser()
-    exp_args['seed'] = None if exp_args['seed'] == -1 else exp_args['seed']
+    exp_args['data_seed'] = None if exp_args['data_seed'] == -1 else exp_args['data_seed']
     num_epochs = exp_args['epochs']
     run_mode = exp_args['mode']
     if run_mode != 'train':
@@ -232,14 +233,14 @@ def main():
                                               transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
                                                                            interpolation=
                                                                            transforms.InterpolationMode.BICUBIC),
-                                              transforms.RandomOrder(color_transforms),
+                                              # transforms.RandomOrder(color_transforms),
                                               transforms.RandomHorizontalFlip(),
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD),
-                                              transforms.RandomErasing(p=0.5)
+                                              # transforms.RandomErasing(p=0.5)
                                               ])
     
-    src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['seed']), train=True,
+    src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['data_seed']), train=True,
                                             transform=src_transform_train,
                                             hypertune=hypertune, num_instances=num_instances,
                                             num_images_per_class=num_images_per_class,
@@ -262,11 +263,11 @@ def main():
                                                transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
                                                                             interpolation=
                                                                             transforms.InterpolationMode.BICUBIC),
-                                               transforms.RandomOrder(color_transforms),
+                                               # transforms.RandomOrder(color_transforms),
                                                transforms.RandomHorizontalFlip(),
                                                transforms.ToTensor(),
                                                transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD),
-                                               transforms.RandomErasing(p=0.5)
+                                               # transforms.RandomErasing(p=0.5)
                                                ])
     trgt_data_train = datasets.DatasetIN12(train=True, transform=trgt_transform_train, fraction=1.0,
                                            hypertune=hypertune)
@@ -282,7 +283,8 @@ def main():
     
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
-    
+
+    torch.manual_seed(exp_args["seed"])
     if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
         load_file_path = exp_args['load_path'] + "final_model.pt"
         load_file = torch.load(load_file_path)

@@ -19,14 +19,14 @@ class ResNet18JAN(nn.Module):
         self.dropout = dropout
         self.p = p
         self.bottleneck = nn.Sequential(
-            nn.Linear(self.backbone_fc_size, self.bottleneck_dim),
+            nn.Linear(self.backbone_fc_size, self.bottleneck_dim, bias=False),
             nn.BatchNorm1d(self.bottleneck_dim),
             nn.ReLU()
         )
         if bottleneck_weights is not None:
             self.bottleneck.load_state_dict(bottleneck_weights)
         else:
-            self.bottleneck.apply(utils.weights_init)
+            nn.init.kaiming_normal_(self.bottleneck[0].weight.data, nonlinearity='relu')
 
         self.backbone_dropout = nn.Dropout(p=self.p) if self.dropout in [1, 3] else nn.Identity()
         self.bottleneck_dropout = nn.Dropout(p=self.p) if self.dropout in [2, 3] else nn.Identity()
@@ -35,7 +35,7 @@ class ResNet18JAN(nn.Module):
         if classifier_weights is not None:
             self.classifier_head.load_state_dict(classifier_weights)
         else:
-            self.classifier_head.apply(utils.weights_init)
+            nn.init.kaiming_normal_(self.classifier_head.weight.data, nonlinearity='relu')
     
     def forward(self, x):
         """Forward method"""
