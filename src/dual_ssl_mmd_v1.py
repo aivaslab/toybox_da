@@ -75,7 +75,8 @@ def run_training(exp_args):
     track_knn_acc = not exp_args['ignore_knn_acc']
     queue_factor = exp_args['queue_factor']
     split_div_loss = exp_args['split_div_loss']
-    num_split_images = exp_args['num_split_images']
+    num_near_images = exp_args['near_images']
+    num_far_images = exp_args['far_images']
     div_alpha_schedule = exp_args['div_alpha_type']
     div_alpha_start = exp_args['div_alpha_start']
     ind_mmd_loss = exp_args['ind_mmd_loss']
@@ -129,7 +130,7 @@ def run_training(exp_args):
         div_alpha=div_alpha, ignore_div_loss=ignore_div_loss, asymmetric=asymmetric, use_ot=use_ot,
         div_metric=div_metric, combined_fwd_pass=combined_forward_pass, div_alpha_schedule=div_alpha_schedule,
         div_alpha_start=div_alpha_start, track_knn_acc=track_knn_acc, queue_size=queue_factor * b_size,
-        num_split_images=num_split_images, ind_mmd_loss=ind_mmd_loss, use_bb_mmd=use_bb_mmd,
+        num_near_images=num_near_images, num_far_images=num_far_images, ind_mmd_loss=ind_mmd_loss, use_bb_mmd=use_bb_mmd,
         split_div_type=split_div_type)
 
     optimizer = torch.optim.SGD(net.backbone.parameters(), lr=exp_args['lr'], weight_decay=exp_args['wd'],
