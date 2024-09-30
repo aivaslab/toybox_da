@@ -38,6 +38,7 @@ def get_parser():
     parser.add_argument("--decoupled", action='store_true', default=False, help="This flag allows us  to use "
                                                                                 "decoupled contrastive loss")
     parser.add_argument("--dataset", required=True, choices=['in12', 'toybox', 'joint'], help="SSL dataset to train on")
+    parser.add_argument("--final", "-f", default=False, action="store_true")
     
     return vars(parser.parse_args())
 
@@ -52,6 +53,7 @@ def main():
     save_dir = exp_args['save_dir']
     decoupled_loss = exp_args['decoupled']
     dataset = exp_args['dataset'].lower()
+    hypertune = not exp_args['final']
     assert dataset in ['in12', 'toybox']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
@@ -67,7 +69,7 @@ def main():
                                               transforms.RandomHorizontalFlip(),
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.IN12_MEAN, std=datasets.IN12_STD)])
-        data_train = datasets.DatasetIN12SSL(transform=transform_train, fraction=1.0, hypertune=True)
+        data_train = datasets.DatasetIN12SSL(transform=transform_train, fraction=1.0, hypertune=hypertune)
         loader_train = torchdata.DataLoader(data_train, batch_size=exp_args['bsize'], shuffle=True, num_workers=workers,
                                             pin_memory=True, persistent_workers=True, drop_last=True)
     else:
@@ -81,7 +83,7 @@ def main():
                                               transforms.ToTensor(),
                                               transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD)])
         data_train = datasets.ToyboxDatasetSSL(rng=np.random.default_rng(0), transform=transform_train, fraction=1.0,
-                                               hypertune=True, distort='object')
+                                               hypertune=hypertune, distort='object')
         loader_train = torchdata.DataLoader(data_train, batch_size=exp_args['bsize'], shuffle=True, num_workers=workers,
                                             pin_memory=True, persistent_workers=True, drop_last=True)
 
