@@ -39,6 +39,7 @@ def get_parser():
                                                                                 "decoupled contrastive loss")
     parser.add_argument("--dataset", required=True, choices=['in12', 'toybox', 'joint'], help="SSL dataset to train on")
     parser.add_argument("--final", "-f", default=False, action="store_true")
+    parser.add_argument("--save-freq", "-sf", default=-1, type=int)
     
     return vars(parser.parse_args())
 
@@ -54,6 +55,7 @@ def main():
     decoupled_loss = exp_args['decoupled']
     dataset = exp_args['dataset'].lower()
     hypertune = not exp_args['final']
+    save_freq = exp_args['save_freq']
     assert dataset in ['in12', 'toybox']
 
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
@@ -130,6 +132,8 @@ def main():
     for ep in range(1, num_epochs + 1):
         ssl_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
                         ep=ep, ep_total=num_epochs, writer=tb_writer)
+        if not no_save and save_freq > 0 and ep % save_freq == 0:
+            net.save_model(fpath=tb_path + f"model_epoch_{ep}.pt")
 
     if not no_save:
         net.save_model(fpath=tb_path+"final_model.pt")
