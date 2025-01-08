@@ -169,6 +169,373 @@ class DualSSLOrientedModelV1:
                          )
 
 
+class DualSSLJANBase:
+    """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
+
+    def __init__(self, **kwargs):
+        # def __init__(self, network, src_loader, trgt_loader, logger, no_save, tb_ssl_loss, in12_ssl_loss,
+        #              tb_alpha, in12_alpha, div_alpha, asymmetric, use_ot, div_metric,
+        #              fixed_div_alpha, use_div_on_feats, combined_fwd_pass, queue_size, track_knn_acc):
+        self.network = kwargs["network"]
+        self.src_loader = utils.ForeverDataLoader(kwargs["src_loader"])
+        self.trgt_loader = utils.ForeverDataLoader(kwargs["trgt_loader"])
+        self.logger = kwargs["logger"]
+        self.network.cuda()
+        self.network.freeze_train()
+        self.no_save = kwargs["no_save"]
+        self.tb_ssl_loss = kwargs["tb_ssl_loss"]
+        self.in12_ssl_loss = kwargs["in12_ssl_loss"]
+        self.tb_alpha = kwargs["tb_alpha"]
+        self.in12_alpha = kwargs["in12_alpha"]
+        self.combined_fwd_pass = kwargs["combined_fwd_pass"]
+        self.tb_feats_queue = None
+        self.tb_labels_queue = None
+        self.in12_feats_queue = None
+        self.in12_labels_queue = None
+        self.use_bb_mmd = kwargs["use_bb_mmd"]
+        self.track_knn_acc = kwargs["track_knn_acc"]
+        self.queue_size = kwargs["queue_size"]
+        self.asymmetric = kwargs["asymmetric"]
+        self.div_alpha_schedule = kwargs["div_alpha_schedule"]
+        self.div_alpha_start = kwargs["div_alpha_start"]
+        self.div_alpha = kwargs["div_alpha"]
+
+        self.emd_dist_loss = mmd_util.EMD1DLoss()
+        self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+            kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+                     ),
+            linear=False,
+        ).cuda()
+        self.dist_frac = 0.05
+
+        num_params_trainable, num_params = self.network.count_trainable_parameters()
+        self.logger.info(f"{num_params_trainable} / {num_params} parameters are trainable...")
+        torch.autograd.set_detect_anomaly(True)
+
+    def get_paired_distance_chunked(self, src_feats, trgt_feats, metric):
+        n1, dim1 = src_feats.size(0), src_feats.size(1)
+        n2, dim2 = trgt_feats.size(0), trgt_feats.size(1)
+        assert dim1 == dim2
+        all_dists = torch.zeros((n1, n2), dtype=torch.float32).cuda()
+        num_chunks = 16
+        src_chunk_size, trgt_chunk_size = n1 // num_chunks, n2 // num_chunks
+        src_chunks, trgt_chunks = torch.chunk(src_feats, num_chunks, dim=0), torch.chunk(trgt_feats, num_chunks, dim=0)
+        for chunk in src_chunks:
+            assert chunk.shape == (src_chunk_size, dim1)
+        for chunk in trgt_chunks:
+            assert chunk.shape == (trgt_chunk_size, dim1)
+
+        for i, chunk_1 in enumerate(src_chunks):
+            for j, chunk_2 in enumerate(trgt_chunks):
+                dist = self.get_paired_distance(src_feats=chunk_1, trgt_feats=chunk_2, metric=metric)
+                assert dist.shape == (src_chunk_size, trgt_chunk_size)
+                all_dists[i * src_chunk_size: i * src_chunk_size + src_chunk_size,
+                j * trgt_chunk_size: j * trgt_chunk_size + trgt_chunk_size] = dist
+
+        return all_dists
+
+    def get_div_alpha(self, step, steps, ep, ep_total):
+        if ep <= self.div_alpha_start:
+            frac = 0.0
+        else:
+            total_steps = steps * (ep_total - self.div_alpha_start)
+            curr_step = steps * (ep - 1 - self.div_alpha_start) + step
+            if self.div_alpha_schedule == "fixed":
+                frac = 1.0
+            elif self.div_alpha_schedule == "cosine":
+                frac = 1 - 0.5 * (1 + np.cos(curr_step * np.pi / total_steps))
+            else:
+                frac = curr_step / total_steps
+        return self.div_alpha * frac
+
+    def calculate_domain_dist_matching_loss(self, src_feats, trgt_feats):
+        if self.asymmetric:
+            src_feats_cloned = src_feats.clone().detach()
+
+        div_dist_loss = self.mmd_dist_loss((src_feats,), (trgt_feats,))
+        return div_dist_loss
+
+    @staticmethod
+    def get_paired_distance(src_feats, trgt_feats, metric):
+        """Returns the distance matrix between the source features and the target features"""
+        if metric == "cosine":
+            dist = func.cosine_similarity(src_feats.unsqueeze(1), trgt_feats.unsqueeze(0), dim=-1)
+        elif metric == "euclidean":
+            dist = torch.linalg.norm(src_feats.unsqueeze(1) - trgt_feats.unsqueeze(0), dim=-1, ord=2)
+        else:
+            dist = torch.matmul(src_feats, trgt_feats.transpose(0, 1))
+        assert dist.shape == (src_feats.shape[0], trgt_feats.shape[0]), f"{dist.shape}"
+        return dist
+
+    @staticmethod
+    def get_distance(feats, metric):
+        if metric == "cosine":
+            dist = func.cosine_similarity(feats.unsqueeze(1), feats.unsqueeze(0), dim=-1)
+        elif metric == "euclidean":
+            dist = torch.linalg.norm(feats.unsqueeze(1) - feats.unsqueeze(0), dim=-1, ord=2)
+        else:
+            dist = torch.matmul(feats, feats.transpose(0, 1))
+        assert dist.shape == (feats.shape[0], feats.shape[0]), f"{dist.shape}"
+        return dist
+
+    def train(self, optimizer, scheduler, steps, ep, ep_total, writer: tb.SummaryWriter):
+        """Train model"""
+
+        self.network.set_train()
+        num_batches = 0
+        src_loss_total = 0.0
+        trgt_loss_total = 0.0
+        mmd_loss_total = 0.0
+        loss_total = 0.0
+        criterion = nn.CrossEntropyLoss()
+        halfway = steps / 2.0
+        start_time = time.time()
+        src_acc_total = 0.0
+        src_neg_acc_total = 0.0
+        trgt_acc_total = 0.0
+        trgt_neg_acc_total = 0.0
+        for step in range(1, steps + 1):
+            logger_strs = [f"E:{ep}/{ep_total} b:{step}/{steps} LR:{optimizer.param_groups[0]['lr']:.3f}"]
+            tb_scalar_dicts = defaultdict(dict)
+            tb_scalar_dicts["training_lr"] = {
+                'bb': optimizer.param_groups[0]['lr'],
+                'ssl_head': optimizer.param_groups[1]['lr'],
+            }
+            num_batches += 1
+            optimizer.zero_grad()
+
+            src_idx, src_images, src_labels = self.src_loader.get_next_batch()
+            trgt_idx, trgt_images, trgt_labels = self.trgt_loader.get_next_batch()
+            assert len(src_images) == 4 and len(trgt_images) == 2
+
+            src_anchors, src_positives = torch.cat([src_images[0], src_images[2]], dim=0), \
+                torch.cat([src_images[1], src_images[3]], dim=0)
+            src_batch = torch.cat([src_anchors, src_positives], dim=0)
+            trgt_anchors, trgt_positives = trgt_images[0], trgt_images[1]
+            trgt_batch = torch.cat([trgt_anchors, trgt_positives], dim=0)
+            src_labels, trgt_labels = src_labels.cuda(), trgt_labels.cuda()
+            src_size, trgt_size = src_batch.shape[0], trgt_batch.shape[0]
+
+            if self.combined_fwd_pass and self.tb_alpha > 0.0:
+                images = torch.cat([src_batch, trgt_batch], dim=0)
+                images = images.cuda()
+                bb_feats, ssl_feats = self.network.forward_w_feats(images)
+                src_bb_feats, trgt_bb_feats = bb_feats[:src_size], bb_feats[src_size:]
+                src_ssl_feats, trgt_ssl_feats = ssl_feats[:src_size], ssl_feats[src_size:]
+            else:
+                src_batch, trgt_batch = src_batch.cuda(), trgt_batch.cuda()
+                if self.tb_alpha == 0.0:
+                    if step == 1 and ep == 1:
+                        print("Using separate fwd passes because tb-alpha=0.0")
+                    with torch.no_grad():
+                        src_bb_feats, src_ssl_feats = self.network.forward_w_feats(src_batch)
+                else:
+                    src_bb_feats, src_ssl_feats = self.network.forward_w_feats(src_batch)
+                trgt_bb_feats, trgt_ssl_feats = self.network.forward_w_feats(trgt_batch)
+
+            src_anchor_feats_ssl = src_ssl_feats[:src_size//2]
+            src_anchor_feats_bb = src_bb_feats[:src_size//2]
+            trgt_anchor_feats_ssl = trgt_ssl_feats[:trgt_size//2]
+            trgt_anchor_feats_bb = trgt_bb_feats[:trgt_size//2]
+
+            if self.tb_ssl_loss == "simclr":
+                src_logits, src_labels_info_nce = utils.info_nce_loss(features=src_ssl_feats, temp=0.5)
+                src_loss = criterion(src_logits, src_labels_info_nce)
+            elif self.tb_ssl_loss == "dcl":
+                src_loss = utils.decoupled_contrastive_loss(features=src_ssl_feats, temp=0.1)
+            else:
+                concat_src_labels = torch.cat([src_labels for _ in range(4)], dim=0)
+                # print(src_labels.shape, concat_src_labels.shape)
+                src_loss = utils.sup_decoupled_contrastive_loss(features=src_ssl_feats, temp=0.1,
+                                                                labels=concat_src_labels)
+
+            if self.in12_ssl_loss == "dcl":
+                trgt_loss = utils.decoupled_contrastive_loss(features=trgt_ssl_feats, temp=0.1)
+            else:
+                trgt_logits, trgt_labels_info_nce = utils.info_nce_loss(features=trgt_ssl_feats, temp=0.5)
+                trgt_loss = criterion(trgt_logits, trgt_labels_info_nce)
+            src_loss_total += src_loss.item()
+            trgt_loss_total += trgt_loss.item()
+
+            logger_strs.append(f"SSL1:{src_loss_total / num_batches:.2f} SSL2:{trgt_loss_total / num_batches:.2f}")
+            num_images_src = len(src_images[0])
+            num_images_trgt = len(trgt_images[0])
+            if self.use_bb_mmd:
+                src_feats_1, src_feats_2 = src_bb_feats[:num_images_src], \
+                                        src_bb_feats[num_images_src:2 * num_images_src]
+                trgt_feats_1 = trgt_bb_feats[:num_images_trgt]
+            else:
+                src_feats_1, src_feats_2 = src_ssl_feats[:num_images_src], \
+                    src_ssl_feats[num_images_src:2 * num_images_src]
+                trgt_feats_1 = trgt_ssl_feats[:num_images_trgt]
+            src_feats_stacked = torch.stack(tensors=(src_feats_1, src_feats_2), dim=1).view(2 * num_images_src, -1)
+            domain_dist_loss = self.calculate_domain_dist_matching_loss(src_feats=src_feats_stacked,
+                                                                        trgt_feats=trgt_feats_1)
+
+            div_alpha = self.get_div_alpha(steps=steps, step=step, ep=ep, ep_total=ep_total)
+            mmd_loss_total += domain_dist_loss.item()
+            logger_strs.append(f"MMD:{mmd_loss_total / num_batches:.4f}")
+            loss = self.tb_alpha * src_loss + self.in12_alpha * trgt_loss + div_alpha * domain_dist_loss
+
+            loss.backward()
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+
+            loss_total += loss.item()
+            logger_strs.append(f"alfa: {div_alpha:1.1e} Loss:{loss_total/num_batches:.2f}")
+
+            tb_scalar_dicts["training_loss"] = {
+                'src_ssl_loss_ep': src_loss_total / num_batches,
+                'src_ssl_loss_batch': src_loss.item(),
+                'trgt_ssl_loss_ep': trgt_loss_total / num_batches,
+                'trgt_ssl_loss_batch': trgt_loss.item(),
+                'mmd_loss_ep': mmd_loss_total / num_batches,
+                'mmd_loss_batch': domain_dist_loss.item(),
+                'loss_ep': loss_total / num_batches,
+                'loss_batch': loss.item(),
+            }
+
+            if self.track_knn_acc:
+                if self.use_bb_mmd:
+                    src_anchor_feats, trgt_anchor_feats = src_anchor_feats_bb, trgt_anchor_feats_bb
+                else:
+                    src_anchor_feats, trgt_anchor_feats = src_anchor_feats_ssl, trgt_anchor_feats_ssl
+                # Track within-batch accuracy using KNNs
+                # NOTE: This only considers the anchor images. Positive pairs are not considered for KNN acc.
+                # calculation
+                with (torch.no_grad()):
+                    dupl_src_labels = torch.cat([src_labels for _ in range(2)], dim=0)
+
+                    if self.tb_feats_queue is None:
+                        self.tb_feats_queue = src_anchor_feats
+                        self.tb_labels_queue = dupl_src_labels
+                        self.in12_feats_queue = trgt_anchor_feats
+                        self.in12_labels_queue = trgt_labels
+                    else:
+                        self.tb_feats_queue = torch.cat((self.tb_feats_queue, src_anchor_feats))[-self.queue_size:, :]
+                        self.tb_labels_queue = torch.cat((self.tb_labels_queue, dupl_src_labels))[-self.queue_size:]
+                        self.in12_feats_queue = torch.cat((self.in12_feats_queue, trgt_anchor_feats))[
+                                                -self.queue_size:, :]
+                        self.in12_labels_queue = torch.cat((self.in12_labels_queue, trgt_labels))[-self.queue_size:]
+
+                    src_dist_mat = self.get_paired_distance_chunked(src_feats=src_anchor_feats,
+                                                                    trgt_feats=self.tb_feats_queue,
+                                                                    metric="cosine")
+                    trgt_dist_mat = self.get_paired_distance_chunked(src_feats=trgt_anchor_feats,
+                                                                     trgt_feats=self.in12_feats_queue,
+                                                                     metric="cosine")
+
+                    src_k = max(int(self.dist_frac * len(self.tb_feats_queue)), 1)
+
+                    # Get top-2 closest image and discard closest (this should be the image itself) for src feats
+                    src_topk_closest_indices = torch.topk(src_dist_mat, k=src_k+1, largest=True).indices[:, 1:]
+                    src_topk_labels = self.tb_labels_queue[src_topk_closest_indices]
+                    src_topk_matches = torch.sum((src_topk_labels == dupl_src_labels.unsqueeze(1)).int())
+                    # print(src_topk_matches)
+
+                    # Get the furthest image for src feats
+                    _, src_topk_farthest_indices = torch.topk(src_dist_mat, k=src_k, largest=False)
+                    src_farthest_labels = self.tb_labels_queue[src_topk_farthest_indices]
+                    src_farthest_matches = torch.sum((src_farthest_labels == dupl_src_labels.unsqueeze(1)).int())
+
+                    # Calculate src accuracies
+                    src_acc = round(100 * src_topk_matches.item() / (src_k * len(dupl_src_labels)), 2)
+                    src_neg_acc = round(100 * src_farthest_matches.item() / (src_k * len(dupl_src_labels)), 2)
+
+                    trgt_k = max(int(self.dist_frac * len(self.in12_feats_queue)), 1)
+                    # Get top-2 closes image and discard closest (this should be the image itself) for trgt feats
+                    trgt_topk_closest_indices = torch.topk(trgt_dist_mat, k=trgt_k+1, largest=True).indices[:, 1:]
+                    trgt_topk_labels = self.in12_labels_queue[trgt_topk_closest_indices]
+                    trgt_topk_matches = torch.sum((trgt_topk_labels == trgt_labels.unsqueeze(1)).int())
+                    # trgt_topk_labels = self.in12_labels_queue[trgt_topk_closest_indices][:, 1]
+
+                    # Get the furthest image for trgt feats
+                    _, trgt_topk_farthest_indices = torch.topk(trgt_dist_mat, k=trgt_k, largest=False)
+                    trgt_farthest_labels = self.in12_labels_queue[trgt_topk_farthest_indices]
+                    trgt_farthest_matches = torch.sum((trgt_farthest_labels == trgt_labels.unsqueeze(1)).int())
+                    # trgt_farthest_labels = self.in12_labels_queue[trgt_topk_farthest_indices][:, 0]
+
+                    # Calculate trgt accuracies
+                    trgt_acc = round(100 * trgt_topk_matches.item() / (trgt_k * len(trgt_labels)), 2)
+                    trgt_neg_acc = round(100 * trgt_farthest_matches.item() / (trgt_k * len(trgt_labels)), 2)
+
+                    src_acc_total += src_acc
+                    src_neg_acc_total += src_neg_acc
+                    trgt_acc_total += trgt_acc
+                    trgt_neg_acc_total += trgt_neg_acc
+                    logger_strs.append(f"A1:{src_acc_total / num_batches:.2f} A2:{trgt_acc_total / num_batches:.2f} "
+                                       f"A3:{src_neg_acc_total / num_batches:.2f} "
+                                       f"A4:{trgt_neg_acc_total / num_batches:.2f}")
+                    if step == steps:
+                        trgt_q_dist_mat = self.get_paired_distance_chunked(src_feats=self.in12_feats_queue,
+                                                                           trgt_feats=self.in12_feats_queue,
+                                                                           metric="cosine")
+
+                        # Calculate mean within-class and across class distances for source queue
+                        src_q_dist_mat = self.get_paired_distance_chunked(src_feats=self.tb_feats_queue,
+                                                                          trgt_feats=self.tb_feats_queue,
+                                                                          metric="cosine")
+
+                        src_q_cl_match_matrix = (self.tb_labels_queue.unsqueeze(1) ==
+                                                 self.tb_labels_queue.unsqueeze(0)).int()
+                        src_q_cl_mismatch_matrix = torch.ones_like(src_q_cl_match_matrix) - src_q_cl_match_matrix
+                        assert torch.sum(src_q_cl_match_matrix) + torch.sum(src_q_cl_mismatch_matrix) == \
+                               src_q_cl_match_matrix.shape[0] * src_q_cl_match_matrix.shape[1]
+
+                        tb_cl_match_dists = src_q_dist_mat * src_q_cl_match_matrix
+                        tb_cl_mismatch_dists = src_q_dist_mat * src_q_cl_mismatch_matrix
+
+                        tb_cl_match_ave_dist = torch.sum(tb_cl_match_dists) / torch.sum(src_q_cl_match_matrix)
+                        tb_cl_mismatch_ave_dist = torch.sum(tb_cl_mismatch_dists) / torch.sum(src_q_cl_mismatch_matrix)
+
+                        # Calculate mean within-class and across class distances for source queue
+                        trgt_q_cl_match_matrix = (self.in12_labels_queue.unsqueeze(1) ==
+                                                  self.in12_labels_queue.unsqueeze(0)).int()
+                        trgt_q_cl_mismatch_matrix = torch.ones_like(trgt_q_cl_match_matrix) - trgt_q_cl_match_matrix
+                        assert torch.sum(trgt_q_cl_match_matrix) + torch.sum(trgt_q_cl_mismatch_matrix) == \
+                               trgt_q_cl_match_matrix.shape[0] * trgt_q_cl_match_matrix.shape[1]
+
+                        in12_cl_match_dists = trgt_q_dist_mat * trgt_q_cl_match_matrix
+                        in12_cl_mismatch_dists = trgt_q_dist_mat * trgt_q_cl_mismatch_matrix
+
+                        in12_cl_match_ave_dist = torch.sum(in12_cl_match_dists) / torch.sum(trgt_q_cl_match_matrix)
+                        in12_cl_mismatch_ave_dist = \
+                            torch.sum(in12_cl_mismatch_dists) / torch.sum(trgt_q_cl_mismatch_matrix)
+
+                        logger_strs.append(
+                            f"D:[{tb_cl_match_ave_dist:.2f} {tb_cl_mismatch_ave_dist:.2f} "
+                            f"{in12_cl_match_ave_dist:.2f} {in12_cl_mismatch_ave_dist:.2f}]"
+                        )
+                tb_scalar_dicts["knn_queue"] = {
+                    'tb_queue_size': len(self.tb_labels_queue),
+                    'in12_queue_size': len(self.in12_labels_queue),
+                }
+                tb_scalar_dicts["knn_acc"] = {
+                    'src_closest_acc_batch': src_acc,
+                    'src_furthest_acc_batch': src_neg_acc,
+                    'trgt_closest_acc_batch': trgt_acc,
+                    'trgt_furthest_acc_batch': trgt_neg_acc,
+                    'src_closest_acc_ep': src_acc_total / num_batches,
+                    'src_furthest_acc_ep': src_neg_acc_total / num_batches,
+                    'trgt_closest_acc_ep': trgt_acc_total / num_batches,
+                    'trgt_furthest_acc_ep': trgt_neg_acc_total / num_batches
+                }
+            assert optimizer.param_groups[1]['lr'] == optimizer.param_groups[0]['lr']
+            if 0 <= step - halfway < 1 or step == steps:
+                logger_strs.append(f"T:{time.time() - start_time:.0f}s")
+                logger_str = " ".join(logger_strs)
+                self.logger.info(logger_str)
+
+            if not self.no_save:
+                for key, val_dict in tb_scalar_dicts.items():
+                    writer.add_scalars(
+                        main_tag=key,
+                        tag_scalar_dict=val_dict,
+                        global_step=(ep - 1) * steps + num_batches
+                    )
+
+
 class DualSSLWithinDomainDistMatchingModelBase:
     """Module implementing the SSL method for pretraining the DA model with both TB and IN-12 data"""
 
@@ -690,6 +1057,41 @@ class DualSSLWithinDomainAllDistMatchingModel(DualSSLWithinDomainDistMatchingMod
             else:
                 div_dist_loss = self.mmd_dist_loss((src_feats_dists_reshaped,), (trgt_feats_dists_reshaped,))
         return div_dist_loss
+
+
+class DualSSLWithinDomainAllDistNormMatchingModel(DualSSLWithinDomainAllDistMatchingModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def calculate_domain_dist_matching_loss(self, src_feats, trgt_feats):
+        src_feats_dists = self.get_distance(src_feats, metric=self.div_metric)
+        if self.asymmetric:
+            src_feats_dists = src_feats_dists.clone().detach()
+
+        trgt_feats_dists = self.get_distance(trgt_feats, metric=self.div_metric)
+
+        src_feats_dists_reshaped = torch.reshape(src_feats_dists, (-1, 1))
+        trgt_feats_dists_reshaped = torch.reshape(trgt_feats_dists, (-1, 1))
+        num_samples = src_feats_dists_reshaped.shape[0] // 4
+
+        src_sample_idxs = torch.randperm(src_feats_dists_reshaped.size(0))[:num_samples]
+        src_samples = src_feats_dists_reshaped[src_sample_idxs]
+        trgt_sample_idxs = torch.randperm(trgt_feats_dists_reshaped.size(0))[:num_samples]
+        trgt_samples = trgt_feats_dists_reshaped[trgt_sample_idxs]
+        with torch.no_grad():
+            src_feats_dists_min = torch.min(src_samples)
+            trgt_feats_dists_min = torch.min(trgt_samples)
+        src_samples -= src_feats_dists_min
+        trgt_samples -= trgt_feats_dists_min
+        if self.use_ot:
+            div_dist_loss = self.emd_dist_loss(src_samples, trgt_samples)
+        else:
+            if self.ind_mmd_loss:
+                div_dist_loss = self.mmd_dist_loss(src_feats_dists, trgt_feats_dists)
+            else:
+                div_dist_loss = self.mmd_dist_loss((src_samples,), (trgt_samples,))
+        return div_dist_loss
+
 
 
 class DualSSLWithinDomainSplitDistMatchingModelBase(DualSSLWithinDomainDistMatchingModelBase):
