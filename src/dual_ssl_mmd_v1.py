@@ -83,6 +83,7 @@ def run_training(exp_args):
     use_bb_mmd = not exp_args['use_ssl_mmd']
     skip_epochs = exp_args['skip_epochs']
     split_div_type = exp_args['split_div_type']
+    use_jan = exp_args['use_jan']
 
     tb_transform_train = tb_in12_transforms.get_ssl_transform(dset="toybox")
     tb_loader_train = get_dataloader(dset="toybox", batch_size=b_size, ssl_type=tb_ssl_type,
@@ -120,7 +121,9 @@ def run_training(exp_args):
         else:
             model_name = models_dual_ssl.DualSSLWithinDomainDistMatchingModelBase
     else:
-        if split_div_loss:
+        if use_jan:
+          model_name = models_dual_ssl.DualSSLJANBase
+        elif split_div_loss:
             model_name = models_dual_ssl.DualSSLWithinDomainSplitDistMatchingModel
         else:
             model_name = models_dual_ssl.DualSSLWithinDomainAllDistMatchingModel
