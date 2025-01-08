@@ -412,6 +412,16 @@ def calc_accuracy(output, target, topk=(1,)):
         return res, pred_1
 
 
+def calc_binary_accuracy(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Computes the accuracy for binary classification"""
+    with torch.no_grad():
+        batch_size = target.size(0)
+        pred = (output >= 0.5).float().t().view(-1)
+        correct = pred.eq(target.view(-1)).float().sum()
+        ret = torch.mul(correct, 100. / batch_size)
+        return ret
+
+
 def get_parser():
     """
     Use argparse to get parser

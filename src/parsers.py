@@ -87,7 +87,10 @@ def get_dual_ssl_class_mmd_v1_parser():
     parser.add_argument("--ignore-knn-acc", default=False, action='store_true', help="Use this flag to turn off "
                                                                                      "within-batch knn acc tracking")
     parser.add_argument("--queue-factor", "-qf", default=20, type=int, help="Set the size of the knn queue wrt the "
-                                                                           "batch size")
+                                                                            "batch size")
+    parser.add_argument("--normed-mmd", "-norm-mmd", default=False, action='store_true', help="Use this flag to use "
+                                                                                              "normalized version of "
+                                                                                              "mmd loss")
     parser.add_argument("--split-div-loss", "-split-div", default=False, action='store_true',
                         help="Use this flag to compute div loss using closest and farthest "
                              "distances instead of all distances")
@@ -105,5 +108,7 @@ def get_dual_ssl_class_mmd_v1_parser():
                                                                                   "loss on ssl head feats")
     parser.add_argument("--skip-epochs", "-se", default=0, type=int, help="Set the number of epochs of training to "
                                                                           "skip")
+    parser.add_argument("--use-jan", default=False, action='store_true', help="Use this option to apply MMD loss "
+                                                                              "directly on features")
     # parser.add_argument("--knn-dist-acc", default=0.05, type=float, )
     return parser
