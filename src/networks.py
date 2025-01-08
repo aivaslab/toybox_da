@@ -113,7 +113,8 @@ class ResNet18Backbone(nn.Module):
         
         if weights is not None:
             self.model.load_state_dict(weights)
-        
+
+    # @torch.compile(mode='reduce-overhead')
     def forward(self, x, step=None):
         """Forward method"""
         x = self.model.conv1.forward(x)
