@@ -110,10 +110,9 @@ def save_args(path, args):
     out_file.close()
 
 
-def main():
+def main(exp_args):
     """Main method"""
-    
-    exp_args = get_parser()
+
     exp_args['seed'] = 0 if exp_args['seed'] == -1 else exp_args['seed']
     num_epochs = exp_args['epochs']
     steps = exp_args['iters']
@@ -271,4 +270,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = get_parser()
+    main(exp_args=args)
