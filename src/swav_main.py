@@ -16,6 +16,7 @@ import torchvision.transforms.v2 as v2
 from torch import nn
 import torch.utils.data as torchdata
 import torch.utils.tensorboard as tb
+import torch.nn.functional as func
 
 from lightly.loss import SwaVLoss
 from lightly.models.modules import SwaVProjectionHead, SwaVPrototypes
@@ -27,6 +28,7 @@ import parsers
 import utils
 import linear_eval
 import networks
+import mmd_util
 
 
 OUT_DIR = "../out/SwAV/"
@@ -43,7 +45,9 @@ def get_swav_parser():
     base_parser.add_argument("--prototype-freeze-epochs", "-pfe", default=2, type=int)
     base_parser.add_argument("--queue-len", "-qlen", default=3840, type=int)
     base_parser.add_argument("--seed", type=int, default=-1, help="Random seed")
-    base_parser.add_argument("--data-seed", type=int, default=-1, help="Random seed")
+    base_parser.add_argument("--data-seed", type=int, default=-1, help="Random seed for loading Toybox data")
+    base_parser.add_argument("--model-type", choices=['swav', 'swav-pairwise'], default='swav',
+                             help="Model type for training")
     base_parser.add_argument("--reproduce", default=False, action='store_true',
                              help="Use this flag for reproducibility")
     return base_parser
@@ -116,7 +120,7 @@ class SwaVModel(nn.Module):
         queue_prototypes = [self.prototypes(x, epoch) for x in queue_features]
         return queue_prototypes
 
-    def compute_loss(self, high_resolution, low_resolution, queue):
+    def compute_loss(self, high_resolution, low_resolution, queue, **kwargs):
         loss = self.criterion(high_resolution, low_resolution, queue)
         self.swav_loss_meter.update(loss.item())
         loss_dict = {
@@ -139,12 +143,105 @@ class SwaVModel(nn.Module):
         torch.save(weights_dict, fpath)
 
 
+class SwaVModelPairwiseMMD(SwaVModel):
+    def __init__(self, queue_start, prototype_freeze_epochs, queue_len=3840, sinkhorn_epsilon=0.05, asymmetric=False,
+                 dist_metric='cosine'):
+        super().__init__(queue_start=queue_start, prototype_freeze_epochs=prototype_freeze_epochs, queue_len=queue_len,
+                         sinkhorn_epsilon=sinkhorn_epsilon)
+        self.asymmetric_mmd = asymmetric
+        self.dist_metric = dist_metric
+        self.anchor_features = None
+        self.mmd_loss_meter = utils.AverageMeter(name='mmd_loss_meter')
+        self.total_loss_meter = utils.AverageMeter(name='total_loss_meter')
+        self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+            kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+                     ),
+            linear=False,
+        ).cuda()
+
+    def forward(self, high_resolution, low_resolution, epoch):
+        self.prototypes.normalize()
+
+        high_resolution_features = [self._subforward(x) for x in high_resolution]
+        low_resolution_features = [self._subforward(x) for x in low_resolution]
+        self.anchor_features = high_resolution_features[0]
+
+        high_resolution_prototypes = [
+            self.prototypes(x, epoch) for x in high_resolution_features
+        ]
+        low_resolution_prototypes = [
+            self.prototypes(x, epoch) for x in low_resolution_features
+        ]
+        queue_prototypes = self._get_queue_prototypes(high_resolution_features, epoch)
+
+        return high_resolution_prototypes, low_resolution_prototypes, queue_prototypes
+
+    def compute_mmd_loss(self):
+        src_size = self.anchor_features.shape[0] // 2
+        src_feats = self.anchor_features[:src_size, :]
+        trgt_feats = self.anchor_features[src_size:, :]
+        src_dists, trgt_dists = get_distance(src_feats, metric=self.dist_metric), \
+            get_distance(trgt_feats, metric=self.dist_metric)
+        src_dists, trgt_dists = torch.reshape(src_dists, (-1, 1)), torch.reshape(trgt_dists, (-1, 1))
+        if self.asymmetric_loss:
+            src_dists = src_dists.clone().detach()
+        mmd_loss = self.mmd_dist_loss((src_dists, ), (trgt_dists, ))
+        # print(self.anchor_features.shape, src_feats.shape, trgt_feats.shape, src_dists.shape, trgt_dists.shape,
+        #       mmd_loss.shape, mmd_loss)
+        return mmd_loss
+
+    def compute_loss(self, high_resolution, low_resolution, queue, **kwargs):
+        ssl_loss = self.criterion(high_resolution, low_resolution, queue)
+        mmd_loss = self.compute_mmd_loss()
+        loss = ssl_loss + kwargs['mmd_weight'] * mmd_loss
+        self.swav_loss_meter.update(ssl_loss.item())
+        self.mmd_loss_meter.update(mmd_loss.item())
+        self.total_loss_meter.update(loss.item())
+        loss_dict = {
+            "ssl_loss_batch":   ssl_loss.item(),
+            "ssl_loss_ep":      self.swav_loss_meter.avg,
+            "mmd_loss_batch":   mmd_loss.item(),
+            "mmd_loss_ep":      self.mmd_loss_meter.avg,
+            "total_loss_batch": loss.item(),
+            "total_loss_ep":    self.total_loss_meter.avg,
+        }
+
+        loss_str = (f"ssl: {self.swav_loss_meter.avg:.4f}  mmd: {self.mmd_loss_meter.avg:.4f}  "
+                    f"tot: {self.total_loss_meter.avg:.4f}")
+        return loss, loss_dict, loss_str
+
+    def reset_meters(self):
+        self.swav_loss_meter.reset()
+        self.mmd_loss_meter.reset()
+        self.total_loss_meter.reset()
+
+
 def set_seeds(seed, reproduce):
     torch.manual_seed(seed)
     np.random.seed(seed)
     if reproduce:
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
+
+
+def get_div_alpha(alpha_start, step, steps, ep, ep_total):
+    if ep <= alpha_start:
+        frac = 0.0
+    else:
+        total_steps = steps * (ep_total - alpha_start)
+        curr_step = steps * (ep - 1 - alpha_start) + step
+        frac = curr_step / total_steps
+    return frac
+
+def get_distance(feats, metric):
+    if metric == "cosine":
+        dist = func.cosine_similarity(feats.unsqueeze(1), feats.unsqueeze(0), dim=-1)
+    elif metric == "euclidean":
+        dist = torch.linalg.norm(feats.unsqueeze(1) - feats.unsqueeze(0), dim=-1, ord=2)
+    else:
+        dist = torch.matmul(feats, feats.transpose(0, 1))
+    assert dist.shape == (feats.shape[0], feats.shape[0]), f"{dist.shape}"
+    return dist
 
 
 def train(args):
@@ -156,6 +253,7 @@ def train(args):
         args['prototype_freeze_epochs']
     queue_length = args['queue_len']
     reproduce = args['reproduce']
+    model_type = args['model_type']
 
     seed, data_seed = args['seed'], args['data_seed']
     random_rng = np.random.default_rng()
@@ -173,9 +271,12 @@ def train(args):
     if not no_save:
         logger.info(f"Experiment log and model output will be saved to {tb_path}")
 
-    model = SwaVModel(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start, queue_len=queue_length,
-                      sinkhorn_epsilon=sinkhorn_eps)
-
+    if model_type == 'swav':
+        model = SwaVModel(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start,
+                          queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps)
+    else:
+        model = SwaVModelPairwiseMMD(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start,
+                                     queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
@@ -286,7 +387,9 @@ def train(args):
             high_resolution, low_resolution, queue = model(
                 high_resolution, low_resolution, epoch - 1
             )
-            loss, losses_dict, loss_str = model.compute_loss(high_resolution, low_resolution, queue)
+            div_alpha = get_div_alpha(0, it+1, steps, epoch, epochs)
+            loss, losses_dict, loss_str = model.compute_loss(high_resolution, low_resolution, queue,
+                                                             mmd_weight=div_alpha)
             total_loss += loss.item()
             loss.backward()
             optimizer.step()
@@ -308,6 +411,9 @@ def train(args):
                                      global_step=(epoch - 1) * steps + num_batches)
                 tb_writer.add_scalar("training_deets/sinkhorn_epsilon", model.criterion.sinkhorn_epsilon,
                                      global_step=(epoch - 1) * steps + num_batches)
+                if model_type == "swav-pairwise":
+                    tb_writer.add_scalar("training_deets/div_alpha", div_alpha,
+                                         global_step=(epoch - 1) * steps + num_batches)
             if not no_save:
                 for key, val_dict in tb_scalar_dicts.items():
                     tb_writer.add_scalars(
@@ -315,9 +421,11 @@ def train(args):
                         tag_scalar_dict=val_dict,
                         global_step=(epoch - 1) * steps + num_batches
                     )
-        logger_str = [f"ep: {epoch}/{epochs}  it: {steps}/{steps}  lr: {optimizer.param_groups[0]['lr']:1.2e}",
+        logger_strs = [f"ep: {epoch}/{epochs}  it: {steps}/{steps}  lr: {optimizer.param_groups[0]['lr']:1.2e}",
                       loss_str, f"t: {time.time() - start_time:.0f}s"]
-        logger.info("  ".join(logger_str))
+        if model_type == "swav-pairwise":
+            logger_strs.append(f"alpha: {div_alpha:.3f}")
+        logger.info("  ".join(logger_strs))
         model.reset_meters()
 
     if not no_save:
