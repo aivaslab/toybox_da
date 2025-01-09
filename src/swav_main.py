@@ -12,7 +12,6 @@ import os
 from collections import defaultdict
 
 import torch
-import torchvision
 import torchvision.transforms.v2 as v2
 from torch import nn
 import torch.utils.data as torchdata
@@ -43,15 +42,20 @@ def get_swav_parser():
     base_parser.add_argument("--queue-start", "-qs", default=3, type=int)
     base_parser.add_argument("--prototype-freeze-epochs", "-pfe", default=2, type=int)
     base_parser.add_argument("--queue-len", "-qlen", default=3840, type=int)
+    base_parser.add_argument("--seed", type=int, default=-1, help="Random seed")
+    base_parser.add_argument("--data-seed", type=int, default=-1, help="Random seed")
+    base_parser.add_argument("--reproduce", default=False, action='store_true',
+                             help="Use this flag for reproducibility")
     return base_parser
 
 
 class SwaVModel(nn.Module):
-    def __init__(self, queue_start, prototype_freeze_epochs, queue_len=3840):
+    def __init__(self, queue_start, prototype_freeze_epochs, queue_len=3840, sinkhorn_epsilon=0.05):
         super().__init__()
         self.queue_start = queue_start
         self.prototype_freeze_epochs = prototype_freeze_epochs
         self.queue_len = queue_len
+        self.sinkhorn_epsilon = sinkhorn_epsilon
 
         self.backbone = networks.ResNet18Backbone(pretrained=False, weights=None)
         self.projection_head = SwaVProjectionHead(512, 512, 128)
@@ -61,6 +65,8 @@ class SwaVModel(nn.Module):
         self.queues = nn.ModuleList(
             [MemoryBankModule(size=(self.queue_len, 128)) for _ in range(2)]
         )
+        self.criterion = SwaVLoss(sinkhorn_epsilon=sinkhorn_epsilon)
+        self.swav_loss_meter = utils.AverageMeter(name="swav_loss")
 
     def forward(self, high_resolution, low_resolution, epoch):
         self.prototypes.normalize()
@@ -78,8 +84,8 @@ class SwaVModel(nn.Module):
 
         return high_resolution_prototypes, low_resolution_prototypes, queue_prototypes
 
-    def _subforward(self, input):
-        features = self.backbone(input).flatten(start_dim=1)
+    def _subforward(self, images):
+        features = self.backbone(images).flatten(start_dim=1)
         features = self.projection_head(features)
         features = nn.functional.normalize(features, dim=1, p=2)
         return features
@@ -96,7 +102,7 @@ class SwaVModel(nn.Module):
         queue_features = []
         for i in range(len(self.queues)):
             _, features = self.queues[i](high_resolution_features[i], update=True)
-            # Queue features are in (num_ftrs X queue_length) shape, while the high res
+            # Queue features are in (num_ftrs X queue_length) shape, while the high-res
             # features are in (batch_size X num_ftrs). Swap the axes for interoperability.
             features = torch.permute(features, (1, 0))
             queue_features.append(features)
@@ -110,6 +116,19 @@ class SwaVModel(nn.Module):
         queue_prototypes = [self.prototypes(x, epoch) for x in queue_features]
         return queue_prototypes
 
+    def compute_loss(self, high_resolution, low_resolution, queue):
+        loss = self.criterion(high_resolution, low_resolution, queue)
+        self.swav_loss_meter.update(loss.item())
+        loss_dict = {
+            "loss_batch": loss.item(),
+            "loss_ep":    self.swav_loss_meter.avg
+        }
+        loss_str = f"ssl: {self.swav_loss_meter.avg:.6f}"
+        return loss, loss_dict, loss_str
+
+    def reset_meters(self):
+        self.swav_loss_meter.reset()
+
     def save_model(self, fpath):
         weights_dict = {
             'type': self.__class__.__name__,
@@ -120,15 +139,30 @@ class SwaVModel(nn.Module):
         torch.save(weights_dict, fpath)
 
 
+def set_seeds(seed, reproduce):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if reproduce:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+
+
 def train(args):
-    epochs, steps, bsize, workers = args['epochs'], args['iters'],args['bsize'], args['workers']
+    epochs, steps, bsize, workers = args['epochs'], args['iters'], args['bsize'], args['workers']
     tb_ssl_type = args['tb_ssl_type']
     lr, lr_sched, wd, hypertune = args['lr'], args['lr_sched'], args['wd'], not args['final']
     no_save, save_dir, save_freq = args['no_save'], args['save_dir'], args['save_freq']
     sinkhorn_eps, queue_start, prototype_freeze_epochs = args['sinkhorn_epsilon'], args['queue_start'], \
         args['prototype_freeze_epochs']
     queue_length = args['queue_len']
-    # print(sinkhorn_eps, queue_start, prototype_freeze_epochs)
+    reproduce = args['reproduce']
+
+    seed, data_seed = args['seed'], args['data_seed']
+    random_rng = np.random.default_rng()
+    args['seed'] = seed if seed != -1 else int(random_rng.random() * 1e8)
+    args['data_seed'] = data_seed if data_seed != -1 else int(random_rng.random() * 1e8)
+
+    set_seeds(seed=args['seed'], reproduce=reproduce)
 
     start_time = datetime.datetime.now()
     tb_path = OUT_DIR + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
@@ -136,8 +170,11 @@ def train(args):
     assert not os.path.isdir(tb_path), f"{tb_path} already exists.."
     tb_writer = tb.SummaryWriter(log_dir=tb_path + "tensorboard/") if not no_save else None
     logger = utils.create_logger(log_level_str=args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
+    if not no_save:
+        logger.info(f"Experiment log and model output will be saved to {tb_path}")
 
-    model = SwaVModel(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start, queue_len=queue_length)
+    model = SwaVModel(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start, queue_len=queue_length,
+                      sinkhorn_epsilon=sinkhorn_eps)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
@@ -151,7 +188,8 @@ def train(args):
                                      ]
                                     )
 
-    tb_train_dataset = datasets.ToyboxDatasetSSL(rng=np.random.default_rng(0), transform=tb_transform_train,
+    tb_train_dataset = datasets.ToyboxDatasetSSL(rng=np.random.default_rng(args['data_seed']),
+                                                 transform=tb_transform_train,
                                                  distort=tb_ssl_type, hypertune=hypertune)
 
     tb_loader_train = torchdata.DataLoader(tb_train_dataset, batch_size=bsize//2, shuffle=True, num_workers=workers,
@@ -159,9 +197,10 @@ def train(args):
 
     in12_transform_train = v2.Compose([v2.ToPILImage(),
                                        SwaVTransform(crop_counts=(1, 3),
-                                                     normalize={"mean": datasets.IN12_MEAN,
-                                                                "std": datasets.IN12_STD
-                                                               }
+                                                     normalize={
+                                                         "mean": datasets.IN12_MEAN,
+                                                         "std": datasets.IN12_STD
+                                                     }
                                                      )
                                        ]
                                       )
@@ -173,8 +212,6 @@ def train(args):
 
     tb_forever_loader = utils.ForeverDataLoader(tb_loader_train)
     in12_forever_loader = utils.ForeverDataLoader(in12_loader_train)
-
-    criterion = SwaVLoss(sinkhorn_epsilon=sinkhorn_eps)
 
     optimizer = torch.optim.Adam(model.backbone.parameters(), lr=lr, weight_decay=wd)
     optimizer.add_param_group({'params': model.projection_head.parameters(), 'lr': lr, 'wd': wd})
@@ -190,13 +227,13 @@ def train(args):
     else:
         combined_scheduler = None
 
-    print("Starting Training")
-
     for epoch in range(1, epochs+1):
         num_batches = 0
         total_loss = 0
         start_time = time.time()
+        loss_str = ""
         for it in range(steps):
+            # print(it)
             tb_scalar_dicts = defaultdict(dict)
             num_batches += 1
             src_idxs, src_images, src_labels = tb_forever_loader.get_next_batch()
@@ -249,7 +286,7 @@ def train(args):
             high_resolution, low_resolution, queue = model(
                 high_resolution, low_resolution, epoch - 1
             )
-            loss = criterion(high_resolution, low_resolution, queue)
+            loss, losses_dict, loss_str = model.compute_loss(high_resolution, low_resolution, queue)
             total_loss += loss.item()
             loss.backward()
             optimizer.step()
@@ -262,20 +299,14 @@ def train(args):
                     "projection": optimizer.param_groups[1]['lr'],
                     "prototypes": optimizer.param_groups[2]['lr']
                 }
-                tb_scalar_dicts["training_loss"] = {
-                    "loss_batch": loss.item(),
-                    "loss_ep":    total_loss / num_batches
-                }
-                # tb_scalar_dicts["training_deets"] = {
-                #     "queue_size": 0 if queue is None else queue[0].size(0),
-                #     "proto_changing": int(model.prototypes.weight.requires_grad)
-                # }
+                tb_scalar_dicts["training_loss"] = losses_dict
+
                 tb_writer.add_scalar("training_deets/qsize", 0 if queue is None else queue[0].size(0),
                                      global_step=(epoch - 1) * steps + num_batches)
                 tb_writer.add_scalar("training_deets/proto_changing",
                                      int(model.prototypes.heads[0].weight.requires_grad),
                                      global_step=(epoch - 1) * steps + num_batches)
-                tb_writer.add_scalar("training_deets/sinkhorn_epsilon", criterion.sinkhorn_epsilon,
+                tb_writer.add_scalar("training_deets/sinkhorn_epsilon", model.criterion.sinkhorn_epsilon,
                                      global_step=(epoch - 1) * steps + num_batches)
             if not no_save:
                 for key, val_dict in tb_scalar_dicts.items():
@@ -284,15 +315,16 @@ def train(args):
                         tag_scalar_dict=val_dict,
                         global_step=(epoch - 1) * steps + num_batches
                     )
-        avg_loss = total_loss / steps
-        logger.info(f"ep: {epoch}/{epochs}  it: {steps}/{steps}  lr: {optimizer.param_groups[0]['lr']:1.2e}  ssl:"
-                    f" {avg_loss:.5f}  t:"
-                    f" {time.time() - start_time:.0f}s")
+        logger_str = [f"ep: {epoch}/{epochs}  it: {steps}/{steps}  lr: {optimizer.param_groups[0]['lr']:1.2e}",
+                      loss_str, f"t: {time.time() - start_time:.0f}s"]
+        logger.info("  ".join(logger_str))
+        model.reset_meters()
 
     if not no_save:
         final_model_path = f"{tb_path}/final_model.pt"
         utils.save_args(path=tb_path, args=args)
         model.save_model(fpath=final_model_path)
+        logger.info(f"Experiment log and model output saved to {tb_path}")
         return tb_path
     return None
 
@@ -322,4 +354,3 @@ if __name__ == "__main__":
             'save_dir': ""
         }
         linear_eval.main(exp_args=linear_eval_args)
-
