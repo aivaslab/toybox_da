@@ -50,6 +50,11 @@ def get_swav_parser():
                              help="Model type for training")
     base_parser.add_argument("--reproduce", default=False, action='store_true',
                              help="Use this flag for reproducibility")
+    base_parser.add_argument("--mmd-alpha", "-ma", default=1.0, type=float, help="Max value of MMD alpha parameter")
+    base_parser.add_argument("--mmd-alpha-start", "-mas", default=0, type=int, help="Epoch where MMD loss starts "
+                                                                                    "being applied")
+    base_parser.add_argument("--asymmetric-mmd", "-asym", default=False, action='store_true',
+                             help="Use this flag to use the asymmetric version of MMD loss")
     return base_parser
 
 
@@ -183,7 +188,7 @@ class SwaVModelPairwiseMMD(SwaVModel):
         src_dists, trgt_dists = get_distance(src_feats, metric=self.dist_metric), \
             get_distance(trgt_feats, metric=self.dist_metric)
         src_dists, trgt_dists = torch.reshape(src_dists, (-1, 1)), torch.reshape(trgt_dists, (-1, 1))
-        if self.asymmetric_loss:
+        if self.asymmetric_mmd:
             src_dists = src_dists.clone().detach()
         mmd_loss = self.mmd_dist_loss((src_dists, ), (trgt_dists, ))
         # print(self.anchor_features.shape, src_feats.shape, trgt_feats.shape, src_dists.shape, trgt_dists.shape,
@@ -224,14 +229,15 @@ def set_seeds(seed, reproduce):
         torch.backends.cudnn.deterministic = True
 
 
-def get_div_alpha(alpha_start, step, steps, ep, ep_total):
+def get_mmd_alpha(alpha_start, step, steps, ep, ep_total, max_alpha):
     if ep <= alpha_start:
         frac = 0.0
     else:
         total_steps = steps * (ep_total - alpha_start)
         curr_step = steps * (ep - 1 - alpha_start) + step
         frac = curr_step / total_steps
-    return frac
+    return frac * max_alpha
+
 
 def get_distance(feats, metric):
     if metric == "cosine":
@@ -254,6 +260,7 @@ def train(args):
     queue_length = args['queue_len']
     reproduce = args['reproduce']
     model_type = args['model_type']
+    mmd_alpha_max, mmd_alpha_start, asymmetric_mmd = args['mmd_alpha'], args['mmd_alpha_start'], args['asymmetric_mmd']
 
     seed, data_seed = args['seed'], args['data_seed']
     random_rng = np.random.default_rng()
@@ -276,7 +283,7 @@ def train(args):
                           queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps)
     else:
         model = SwaVModelPairwiseMMD(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start,
-                                     queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps)
+                                     queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps, asymmetric=asymmetric_mmd)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
@@ -387,9 +394,10 @@ def train(args):
             high_resolution, low_resolution, queue = model(
                 high_resolution, low_resolution, epoch - 1
             )
-            div_alpha = get_div_alpha(0, it+1, steps, epoch, epochs)
+            mmd_alpha = get_mmd_alpha(alpha_start=mmd_alpha_start, step=it+1, steps=steps, ep=epoch, ep_total=epochs,
+                                      max_alpha=mmd_alpha_max)
             loss, losses_dict, loss_str = model.compute_loss(high_resolution, low_resolution, queue,
-                                                             mmd_weight=div_alpha)
+                                                             mmd_weight=mmd_alpha)
             total_loss += loss.item()
             loss.backward()
             optimizer.step()
@@ -412,7 +420,7 @@ def train(args):
                 tb_writer.add_scalar("training_deets/sinkhorn_epsilon", model.criterion.sinkhorn_epsilon,
                                      global_step=(epoch - 1) * steps + num_batches)
                 if model_type == "swav-pairwise":
-                    tb_writer.add_scalar("training_deets/div_alpha", div_alpha,
+                    tb_writer.add_scalar("training_deets/div_alpha", mmd_alpha,
                                          global_step=(epoch - 1) * steps + num_batches)
             if not no_save:
                 for key, val_dict in tb_scalar_dicts.items():
@@ -422,9 +430,9 @@ def train(args):
                         global_step=(epoch - 1) * steps + num_batches
                     )
         logger_strs = [f"ep: {epoch}/{epochs}  it: {steps}/{steps}  lr: {optimizer.param_groups[0]['lr']:1.2e}",
-                      loss_str, f"t: {time.time() - start_time:.0f}s"]
+                       loss_str, f"t: {time.time() - start_time:.0f}s"]
         if model_type == "swav-pairwise":
-            logger_strs.append(f"alpha: {div_alpha:.3f}")
+            logger_strs.append(f"alpha: {mmd_alpha:.3f}")
         logger.info("  ".join(logger_strs))
         model.reset_meters()
 
