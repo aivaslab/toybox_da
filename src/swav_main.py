@@ -55,6 +55,8 @@ def get_swav_parser():
                                                                                     "being applied")
     base_parser.add_argument("--asymmetric-mmd", "-asym", default=False, action='store_true',
                              help="Use this flag to use the asymmetric version of MMD loss")
+    base_parser.add_argument("--linear-mmd", "-lmmd", default=False, action='store_true',
+                             help="Use this flag to use linear version of the mmd loss")
     return base_parser
 
 
@@ -150,7 +152,7 @@ class SwaVModel(nn.Module):
 
 class SwaVModelPairwiseMMD(SwaVModel):
     def __init__(self, queue_start, prototype_freeze_epochs, queue_len=3840, sinkhorn_epsilon=0.05, asymmetric=False,
-                 dist_metric='cosine'):
+                 dist_metric='cosine', linear_mmd=False):
         super().__init__(queue_start=queue_start, prototype_freeze_epochs=prototype_freeze_epochs, queue_len=queue_len,
                          sinkhorn_epsilon=sinkhorn_epsilon)
         self.asymmetric_mmd = asymmetric
@@ -158,11 +160,18 @@ class SwaVModelPairwiseMMD(SwaVModel):
         self.anchor_features = None
         self.mmd_loss_meter = utils.AverageMeter(name='mmd_loss_meter')
         self.total_loss_meter = utils.AverageMeter(name='total_loss_meter')
-        self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
-            kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
-                     ),
-            linear=False,
-        ).cuda()
+        self.linear_mmd = linear_mmd
+        if self.linear_mmd:
+            self.mmd_dist_loss = mmd_util.JMMDLinear(
+                kernels=([mmd_util.GaussianKernelLinear(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+                         ),
+            ).cuda()
+        else:
+            self.mmd_dist_loss = mmd_util.JointMultipleKernelMaximumMeanDiscrepancy(
+                kernels=([mmd_util.GaussianKernel(alpha=2 ** k, track_running_stats=True) for k in range(-3, 2)],
+                         ),
+                linear=False,
+            ).cuda()
 
     def forward(self, high_resolution, low_resolution, epoch):
         self.prototypes.normalize()
@@ -260,8 +269,8 @@ def train(args):
     queue_length = args['queue_len']
     reproduce = args['reproduce']
     model_type = args['model_type']
-    mmd_alpha_max, mmd_alpha_start, asymmetric_mmd = args['mmd_alpha'], args['mmd_alpha_start'], args['asymmetric_mmd']
-
+    mmd_alpha_max, mmd_alpha_start = args['mmd_alpha'], args['mmd_alpha_start']
+    asymmetric_mmd, linear_mmd = args['asymmetric_mmd'], args['linear_mmd']
     seed, data_seed = args['seed'], args['data_seed']
     random_rng = np.random.default_rng()
     args['seed'] = seed if seed != -1 else int(random_rng.random() * 1e8)
@@ -283,7 +292,8 @@ def train(args):
                           queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps)
     else:
         model = SwaVModelPairwiseMMD(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start,
-                                     queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps, asymmetric=asymmetric_mmd)
+                                     queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps, asymmetric=asymmetric_mmd,
+                                     linear_mmd=linear_mmd)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
