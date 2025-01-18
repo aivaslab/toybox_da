@@ -192,7 +192,10 @@ def eval_model(exp_args):
 def main():
     """Main method"""
     exp_args = get_parser()
-    exp_args['data_seed'] = None if exp_args['data_seed'] == -1 else exp_args['data_seed']
+    rand_rng = np.random.default_rng()
+    exp_args['data_seed'] = int(rand_rng.random() * 1e7) if exp_args['data_seed'] == -1 else exp_args['data_seed']
+    exp_args['seed'] = int(rand_rng.random() * 1e7) if exp_args['seed'] == -1 else exp_args['seed']
+    print(f"Using seed: {exp_args['seed']} and data_seed: {exp_args['data_seed']}")
     num_epochs = exp_args['epochs']
     run_mode = exp_args['mode']
     if run_mode != 'train':

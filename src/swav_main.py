@@ -53,6 +53,8 @@ def get_swav_parser():
     base_parser.add_argument("--mmd-alpha", "-ma", default=1.0, type=float, help="Max value of MMD alpha parameter")
     base_parser.add_argument("--mmd-alpha-start", "-mas", default=0, type=int, help="Epoch where MMD loss starts "
                                                                                     "being applied")
+    base_parser.add_argument("--mmd-metric", "-mmm", default='euclidean', choices=['euclidean', 'cosine'],
+                             help="Distance metric for mmd loss")
     base_parser.add_argument("--asymmetric-mmd", "-asym", default=False, action='store_true',
                              help="Use this flag to use the asymmetric version of MMD loss")
     base_parser.add_argument("--linear-mmd", "-lmmd", default=False, action='store_true',
@@ -270,7 +272,7 @@ def train(args):
     reproduce = args['reproduce']
     model_type = args['model_type']
     mmd_alpha_max, mmd_alpha_start = args['mmd_alpha'], args['mmd_alpha_start']
-    asymmetric_mmd, linear_mmd = args['asymmetric_mmd'], args['linear_mmd']
+    asymmetric_mmd, linear_mmd, mmd_metric = args['asymmetric_mmd'], args['linear_mmd'], args['mmd_metric']
     seed, data_seed = args['seed'], args['data_seed']
     random_rng = np.random.default_rng()
     args['seed'] = seed if seed != -1 else int(random_rng.random() * 1e8)
@@ -293,7 +295,7 @@ def train(args):
     else:
         model = SwaVModelPairwiseMMD(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start,
                                      queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps, asymmetric=asymmetric_mmd,
-                                     linear_mmd=linear_mmd)
+                                     linear_mmd=linear_mmd, dist_metric=mmd_metric)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
