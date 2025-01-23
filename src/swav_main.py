@@ -59,6 +59,7 @@ def get_swav_parser():
                              help="Use this flag to use the asymmetric version of MMD loss")
     base_parser.add_argument("--linear-mmd", "-lmmd", default=False, action='store_true',
                              help="Use this flag to use linear version of the mmd loss")
+    base_parser.add_argument("--skip-epochs", "-skip", default=0, type=int, help="Number of epochs to skip")
     return base_parser
 
 
@@ -141,6 +142,15 @@ class SwaVModel(nn.Module):
 
     def reset_meters(self):
         self.swav_loss_meter.reset()
+
+    def load_model(self, fpath):
+        assert os.path.isfile(fpath)
+        wts_file = torch.load(fpath)
+        assert 'SwaVModel' in wts_file['type'], f"Provided model must be of type SwaV but got {wts_file['type']}"
+        backbone_wts, proj_wts, prot_wts = wts_file['backbone'], wts_file['projection_head'], wts_file['prototypes']
+        self.backbone.model.load_state_dict(backbone_wts)
+        self.projection_head.load_state_dict(proj_wts)
+        self.prototypes.load_state_dict(prot_wts)
 
     def save_model(self, fpath):
         weights_dict = {
@@ -277,6 +287,7 @@ def train(args):
     random_rng = np.random.default_rng()
     args['seed'] = seed if seed != -1 else int(random_rng.random() * 1e8)
     args['data_seed'] = data_seed if data_seed != -1 else int(random_rng.random() * 1e8)
+    skip_epochs = args['skip_epochs']
 
     set_seeds(seed=args['seed'], reproduce=reproduce)
 
@@ -296,6 +307,13 @@ def train(args):
         model = SwaVModelPairwiseMMD(prototype_freeze_epochs=prototype_freeze_epochs, queue_start=queue_start,
                                      queue_len=queue_length, sinkhorn_epsilon=sinkhorn_eps, asymmetric=asymmetric_mmd,
                                      linear_mmd=linear_mmd, dist_metric=mmd_metric)
+
+    if args['load_path'] != "" and os.path.isdir(args['load_path']):
+        model_path = f"{args['load_path']}/{args['model_name']}"
+        assert os.path.isfile(model_path)
+        model.load_model(fpath=model_path)
+        logger.info(f"Loading model weights from {model_path}")
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
@@ -340,7 +358,8 @@ def train(args):
     if lr_sched == "cosine":
         warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=0.01, end_factor=1.0,
                                                              total_iters=2 * steps)
-        decay_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=(epochs - 2) * steps)
+        decay_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=(epochs - 2) * steps,
+                                                                     eta_min=0.05*lr)
         combined_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer=optimizer,
                                                                    schedulers=[warmup_scheduler, decay_scheduler],
                                                                    milestones=[2 * steps + 1])
@@ -348,6 +367,12 @@ def train(args):
         combined_scheduler = None
 
     for epoch in range(1, epochs+1):
+        if epoch <= skip_epochs:
+            for it in range(steps):
+                optimizer.step()
+                if combined_scheduler is not None:
+                    combined_scheduler.step()
+            continue
         num_batches = 0
         total_loss = 0
         start_time = time.time()
@@ -461,24 +486,24 @@ if __name__ == "__main__":
     swav_parser = get_swav_parser()
     swav_args = vars(swav_parser.parse_args())
     final_model_save_path = train(args=swav_args)
-    if final_model_save_path is not None:
-        linear_eval_args = {
-            'epochs':   10,
-            'iters':    10,
-            'bsize':   128,
-            'workers':   8,
-            'final': False,
-            'dataset': 'toybox',
-            'lr': 0.001,
-            'wd': 1e-6,
-            'instances': -1,
-            'images':  5000,
-            'seed': -1,
-            'log': 'info',
-            'load_path': final_model_save_path,
-            'model_name': 'final_model.pt',
-            'pretrained': False,
-            'no_save': True,
-            'save_dir': ""
-        }
-        linear_eval.main(exp_args=linear_eval_args)
+    # if final_model_save_path is not None:
+    #     linear_eval_args = {
+    #         'epochs':   10,
+    #         'iters':    10,
+    #         'bsize':   128,
+    #         'workers':   8,
+    #         'final': False,
+    #         'dataset': 'toybox',
+    #         'lr': 0.001,
+    #         'wd': 1e-6,
+    #         'instances': -1,
+    #         'images':  5000,
+    #         'seed': -1,
+    #         'log': 'info',
+    #         'load_path': final_model_save_path,
+    #         'model_name': 'final_model.pt',
+    #         'pretrained': False,
+    #         'no_save': True,
+    #         'save_dir': ""
+    #     }
+    #     linear_eval.main(exp_args=linear_eval_args)
