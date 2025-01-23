@@ -22,7 +22,7 @@ class CSVUtil:
     def __init__(self, fpath):
         """Initialize the object"""
         self.fpath = fpath
-        assert os.path.isfile(self.fpath)
+        assert os.path.isfile(self.fpath), f"{fpath} could not be found..."
         self._fptr = open(self.fpath, 'r')
         self._reader = csv.DictReader(self._fptr)
         self.reader_fields = self._reader.fieldnames
@@ -47,13 +47,13 @@ class CSVUtil:
         cntr = collections.Counter()
         for row in self.reader_data:
             label, prediction = int(row[LABEL_KEY]), int(row[PREDICTION_KEY])
-            cntr[label] += 1
-            conf_matrix[label][prediction] += 1
+            cntr[label] += 1.0
+            conf_matrix[label][prediction] += 1.0
 
         for cl in range(num_classes):
             for cl2 in range(num_classes):
                 conf_matrix[cl][cl2] /= cntr[cl]
-                conf_matrix[cl][cl2] = round(conf_matrix[cl][cl2], 2)
+                conf_matrix[cl][cl2] = conf_matrix[cl][cl2]
 
         return cntr, conf_matrix
 
@@ -95,7 +95,7 @@ class CSVUtil:
 
 
 if __name__ == '__main__':
-    csv_path = "../out/IN12_SUP/in12_supervised_pretrained_finetune_1/output/final_model/in12_test.csv"
+    csv_path = "../out/DANN/TB_IN12/trial_exp/output/final_model/tb_train.csv"
     csv_util = CSVUtil(fpath=csv_path)
     print(f"Accuracy: {csv_util.get_accuracy()}")
     print(f"Loss: {csv_util.get_loss()}")
