@@ -556,6 +556,14 @@ def get_images(images, mean, std, aug=True, cols=8):
     return get_concat_v_multi_blank(hor_images)
 
 
+def set_seeds(seed, reproduce):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if reproduce:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self, name, fmt=':.6f'):
