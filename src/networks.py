@@ -608,6 +608,16 @@ class ResNet18SupWithDomain(nn.Module):
                 'domain_head_params': self.domain_head.parameters()
                 }
 
+    def save_model(self, fpath: str):
+        """Save the model"""
+        save_dict = {
+            'type': self.__class__.__name__,
+            'backbone': self.backbone.model.state_dict(),
+            'classifier': self.classifier_head.state_dict(),
+            'domain_classifier': self.domain_head.state_dict()
+        }
+        torch.save(save_dict, fpath)
+
 
 class ResNet18DualSupJAN(nn.Module):
     """Definition for JAN network with ResNet18"""

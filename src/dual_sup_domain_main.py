@@ -29,8 +29,8 @@ def get_train_test_acc(model, src_train_loader, src_test_loader, trgt_train_load
     trgt_tr_acc, trgt_tr_dom_acc = model.eval(loader=trgt_train_loader, source=False)
     trgt_te_acc, trgt_te_dom_acc = model.eval(loader=trgt_test_loader, source=False)
     logger.info("src tr: {:.2f} (dom:{:.2f})   src te: {:.2f} (dom:{:.2f})   "
-                "trgt tr:{:.2f} (dom:{:.2f})   "
-                "trgt te:{:.2f} (dom:{:.2f})".format(src_tr_acc, src_tr_dom_acc,
+                "trgt tr: {:.2f} (dom:{:.2f})   "
+                "trgt te: {:.2f} (dom:{:.2f})".format(src_tr_acc, src_tr_dom_acc,
                                                      src_te_acc, src_te_dom_acc,
                                                      trgt_tr_acc, trgt_tr_dom_acc,
                                                      trgt_te_acc, trgt_te_dom_acc)
@@ -74,6 +74,7 @@ def get_parser():
     parser.add_argument("--target-frac", "-tf", default=1.0, type=float,
                         help="Set fraction of training images to be used for target dataset")
     parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
+    parser.add_argument("--data-seed", default=-1, type=int, help="Seed for running experiments")
     parser.add_argument("--log", choices=["debug", "info", "warning", "error", "critical"],
                         default="info", type=str)
     parser.add_argument("--pretrained", default=False, action='store_true',
@@ -81,6 +82,8 @@ def get_parser():
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
     parser.add_argument("--no-save", default=False, action='store_true', help="Set this flag to not save anything")
+    parser.add_argument("--save-dir", default="", type=str, help="Directory to save")
+    parser.add_argument("--save-freq", default=-1, type=int, help="Save frequency of model")
     return vars(parser.parse_args())
 
 
@@ -97,7 +100,10 @@ def main():
     """Main method"""
     
     exp_args = get_parser()
-    exp_args['seed'] = None if exp_args['seed'] == -1 else exp_args['seed']
+    rand_rng = np.random.default_rng()
+    exp_args['data_seed'] = int(rand_rng.random() * 1e7) if exp_args['data_seed'] == -1 else exp_args['data_seed']
+    exp_args['seed'] = int(rand_rng.random() * 1e7) if exp_args['seed'] == -1 else exp_args['seed']
+    print(f"Using seed: {exp_args['seed']} and data_seed: {exp_args['data_seed']}")
     num_epochs = exp_args['epochs']
     steps = exp_args['iters']
     b_size = exp_args['bsize']
@@ -107,10 +113,13 @@ def main():
     num_images_per_class = exp_args['images']
     target_frac = exp_args['target_frac']
     no_save = exp_args['no_save']
+    save_dir = exp_args['save_dir']
+    save_freq = exp_args['save_freq']
     
     start_time = datetime.datetime.now()
-    tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/"
-    tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
+    tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
+        OUT_DIR + "TB_IN12/" + save_dir + "/"
+    tb_writer = tb.SummaryWriter(log_dir=tb_path + "tensorboard/") if not no_save else None
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
     
     prob = 0.2
@@ -133,7 +142,7 @@ def main():
                                               transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD),
                                               transforms.RandomErasing(p=0.5)
                                               ])
-    src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['seed']), train=True,
+    src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['data_seed']), train=True,
                                             transform=src_transform_train,
                                             hypertune=hypertune, num_instances=num_instances,
                                             num_images_per_class=num_images_per_class,
@@ -176,7 +185,7 @@ def main():
     
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
     # logger.debug(utils.online_mean_and_sd(trgt_loader_test))
-    
+    utils.set_seeds(seed=exp_args['seed'], reproduce=True)
     if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
         load_file_path = exp_args['load_path'] + "final_model.pt"
         load_file = torch.load(load_file_path)
@@ -212,6 +221,10 @@ def main():
                        writer=tb_writer, step=0, logger=logger, no_save=no_save)
     model.calc_val_loss(ep=0, steps=steps, writer=tb_writer, loaders=[src_loader_test, trgt_loader_test],
                         loader_names=['tb_test', 'in12_test'])
+
+    if not no_save:
+        net.save_model(fpath=tb_path + f"model_epoch_0.pt")
+
     for ep in range(1, num_epochs + 1):
         model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps, ep=ep, ep_total=num_epochs,
                     writer=tb_writer)
@@ -223,6 +236,9 @@ def main():
                                src_train_loader=src_loader_train, src_test_loader=src_loader_test,
                                trgt_train_loader=trgt_loader_train, trgt_test_loader=trgt_loader_test,
                                writer=tb_writer, step=ep * steps, logger=logger, no_save=no_save)
+
+        if not no_save and save_freq > 0 and ep % save_freq == 0:
+            net.save_model(fpath=tb_path+f"model_epoch_{ep}.pt")
             
     src_tr_acc, src_tr_dom_acc, src_te_acc, src_te_dom_acc, \
         trgt_tr_acc, trgt_tr_dom_acc, trgt_te_acc, trgt_te_dom_acc = \
@@ -232,13 +248,14 @@ def main():
     
     if not no_save:
         tb_writer.close()
-        save_dict = {
-            'type': net.__class__.__name__,
-            'backbone': net.backbone.model.state_dict(),
-            'classifier': net.classifier_head.state_dict(),
-            'domain_classifier': net.domain_head.state_dict()
-        }
-        torch.save(save_dict, tb_path + "final_model.pt")
+        net.save_model(fpath=tb_path+"final_model.pt")
+        # save_dict = {
+        #     'type': net.__class__.__name__,
+        #     'backbone': net.backbone.model.state_dict(),
+        #     'classifier': net.classifier_head.state_dict(),
+        #     'domain_classifier': net.domain_head.state_dict()
+        # }
+        # torch.save(save_dict, tb_path + "final_model.pt")
         
         exp_args['tb_train'] = src_tr_acc
         exp_args['tb_test'] = src_te_acc
