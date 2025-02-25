@@ -66,6 +66,7 @@ def get_parser():
     parser.add_argument("--target-frac", "-tf", default=1.0, type=float,
                         help="Set fraction of training images to be used for target dataset")
     parser.add_argument("--seed", default=-1, type=int, help="Seed for running experiments")
+    parser.add_argument("--data-seed", default=-1, type=int, help="Seed for running experiments")
     parser.add_argument("--log", choices=["debug", "info", "warning", "error", "critical"],
                         default="info", type=str)
     parser.add_argument("--pretrained", default=False, action='store_true',
@@ -82,7 +83,10 @@ def main():
     """Main method"""
 
     exp_args = get_parser()
-    exp_args['seed'] = None if exp_args['seed'] == -1 else exp_args['seed']
+    rand_rng = np.random.default_rng()
+    exp_args['data_seed'] = int(rand_rng.random() * 1e7) if exp_args['data_seed'] == -1 else exp_args['data_seed']
+    exp_args['seed'] = int(rand_rng.random() * 1e7) if exp_args['seed'] == -1 else exp_args['seed']
+    print(f"Using seed: {exp_args['seed']} and data_seed: {exp_args['data_seed']}")
     num_epochs = exp_args['epochs']
     steps = exp_args['iters']
     b_size = exp_args['bsize']
@@ -100,7 +104,7 @@ def main():
     tb_path = OUT_DIR + "TB_IN12/" + "exp_" + start_time.strftime("%b_%d_%Y_%H_%M") + "/" if save_dir == "" else \
         OUT_DIR + "TB_IN12/" + save_dir + "/"
     assert not os.path.isdir(tb_path), f"{tb_path} already exists"
-    tb_writer = tb.SummaryWriter(log_dir=tb_path) if not no_save else None
+    tb_writer = tb.SummaryWriter(log_dir=tb_path + "tensorboard/") if not no_save else None
     logger = utils.create_logger(log_level_str=exp_args['log'], log_file_name=tb_path + "log.txt", no_save=no_save)
     if not no_save:
         logger.info("Experimental details and results saved to {}".format(tb_path))
@@ -125,7 +129,7 @@ def main():
                                               transforms.Normalize(mean=datasets.TOYBOX_MEAN, std=datasets.TOYBOX_STD),
                                               transforms.RandomErasing(p=0.5)
                                               ])
-    src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['seed']), train=True,
+    src_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['data_seed']), train=True,
                                             transform=src_transform_train,
                                             hypertune=hypertune, num_instances=num_instances,
                                             num_images_per_class=num_images_per_class,
@@ -167,6 +171,7 @@ def main():
     trgt_data_test = datasets.DatasetIN12(train=False, transform=trgt_transform_test, fraction=1.0, hypertune=hypertune)
     trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers)
 
+    utils.set_seeds(seed=exp_args['seed'], reproduce=True)
     if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
         load_file_path = exp_args['load_path'] + "final_model.pt"
         load_file = torch.load(load_file_path)
