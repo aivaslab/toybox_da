@@ -173,6 +173,34 @@ def main(exp_args):
                                                hypertune=hypertune)
         src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers,
                                                persistent_workers=True, pin_memory=True)
+
+        trgt_transform_train = transforms.Compose([transforms.ToPILImage(),
+                                                  transforms.Resize((256, 256)),
+                                                  transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
+                                                                               interpolation=transforms.
+                                                                               InterpolationMode.BICUBIC),
+                                                  transforms.RandomOrder(color_transforms),
+                                                  transforms.RandomHorizontalFlip(),
+                                                  transforms.ToTensor(),
+                                                  transforms.Normalize(mean=datasets.IN12_MEAN,
+                                                                       std=datasets.IN12_STD),
+                                                  transforms.RandomErasing(p=0.5)
+                                                  ])
+        trgt_data_train = datasets.DatasetIN12(train=True, transform=trgt_transform_train, hypertune=hypertune)
+        logger.debug(f"Dataset: {trgt_data_train}  Size: {len(trgt_data_train)}")
+        trgt_loader_train = torchdata.DataLoader(trgt_data_train, batch_size=b_size, shuffle=True,
+                                                 num_workers=n_workers, persistent_workers=True,
+                                                 pin_memory=True, drop_last=True)
+
+        trgt_transform_test = transforms.Compose([transforms.ToPILImage(),
+                                                 transforms.Resize((224, 224)),
+                                                 transforms.ToTensor(),
+                                                 transforms.Normalize(mean=datasets.IN12_MEAN,
+                                                                      std=datasets.IN12_STD)])
+
+        trgt_data_test = datasets.DatasetIN12(train=False, transform=trgt_transform_test, hypertune=hypertune)
+        trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers,
+                                                persistent_workers=True, pin_memory=True)
         
     else:
         src_transform_train = transforms.Compose([transforms.ToPILImage(),
@@ -200,6 +228,39 @@ def main(exp_args):
     
         src_data_test = datasets.DatasetIN12(train=False, transform=src_transform_test, hypertune=hypertune)
         src_loader_test = torchdata.DataLoader(src_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers,
+                                               persistent_workers=True, pin_memory=True)
+
+        trgt_transform_train = transforms.Compose([transforms.ToPILImage(),
+                                                  transforms.Resize((256, 256)),
+                                                  transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
+                                                                               interpolation=transforms.
+                                                                               InterpolationMode.BICUBIC),
+                                                  transforms.RandomOrder(color_transforms),
+                                                  transforms.RandomHorizontalFlip(),
+                                                  transforms.ToTensor(),
+                                                  transforms.Normalize(mean=datasets.TOYBOX_MEAN,
+                                                                       std=datasets.TOYBOX_STD),
+                                                  transforms.RandomErasing(p=0.5)
+                                                  ])
+        trgt_data_train = datasets.ToyboxDataset(rng=np.random.default_rng(exp_args['seed']), train=True,
+                                                transform=trgt_transform_train,
+                                                hypertune=hypertune, num_instances=num_instances,
+                                                num_images_per_class=num_images_per_class,
+                                                )
+        logger.debug(f"Dataset: {trgt_data_train}  Size: {len(trgt_data_train)}")
+        trgt_loader_train = torchdata.DataLoader(trgt_data_train, batch_size=b_size, shuffle=True,
+                                                 num_workers=n_workers,
+                                                persistent_workers=True, pin_memory=True, drop_last=True)
+
+        trgt_transform_test = transforms.Compose([transforms.ToPILImage(),
+                                                 transforms.Resize((224, 224)),
+                                                 transforms.ToTensor(),
+                                                 transforms.Normalize(mean=datasets.TOYBOX_MEAN,
+                                                                      std=datasets.TOYBOX_STD)])
+
+        trgt_data_test = datasets.ToyboxDataset(rng=np.random.default_rng(), train=False, transform=trgt_transform_test,
+                                               hypertune=hypertune)
+        trgt_loader_test = torchdata.DataLoader(trgt_data_test, batch_size=b_size, shuffle=False, num_workers=n_workers,
                                                persistent_workers=True, pin_memory=True)
     
     # logger.debug(utils.online_mean_and_sd(src_loader_train), utils.online_mean_and_sd(src_loader_test))
@@ -236,6 +297,9 @@ def main(exp_args):
     
     get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                        src_test_loader=src_loader_test, writer=tb_writer, step=0, logger=logger, no_save=no_save)
+
+    get_train_test_acc(model=pre_model, src_train_loader=trgt_loader_train,
+                       src_test_loader=trgt_loader_test, writer=tb_writer, step=0, logger=logger, no_save=True)
     
     for ep in range(1, num_epochs + 1):
         pre_model.train(optimizer=optimizer, scheduler=combined_scheduler, steps=steps,
@@ -244,10 +308,14 @@ def main(exp_args):
             get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                src_test_loader=src_loader_test, writer=tb_writer, step=ep * steps, logger=logger,
                                no_save=no_save)
+            get_train_test_acc(model=pre_model, src_train_loader=trgt_loader_train,
+                               src_test_loader=trgt_loader_test, writer=tb_writer, step=0, logger=logger, no_save=True)
     
     src_tr_acc, src_te_acc = get_train_test_acc(model=pre_model, src_train_loader=src_loader_train,
                                                 src_test_loader=src_loader_test, writer=tb_writer,
                                                 step=num_epochs * steps, logger=logger, no_save=no_save)
+    get_train_test_acc(model=pre_model, src_train_loader=trgt_loader_train,
+                       src_test_loader=trgt_loader_test, writer=tb_writer, step=0, logger=logger, no_save=True)
 
     if not no_save:
         tb_writer.close()
