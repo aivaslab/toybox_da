@@ -165,7 +165,7 @@ def get_indices():
     return all_same_indices, all_same_preds
 
 
-def run_training(indices, predictions):
+def run_training(indices, predictions, logits):
     num_epochs = 50
     b_size = 256
     n_workers = 8
@@ -203,7 +203,7 @@ def run_training(indices, predictions):
                                           transforms.RandomErasing(p=0.5)
                                           ])
     data_train = datasets.DatasetIN12FromIndices(hypertune=False, transform=transform_train,
-                                                 train_indices=indices, labels=predictions)
+                                                 train_indices=indices, labels=predictions, logits=logits)
     noisy_loader_train = torchdata.DataLoader(data_train, batch_size=b_size, shuffle=True, num_workers=n_workers,
                                               pin_memory=True)
 
@@ -268,10 +268,11 @@ def run_training(indices, predictions):
     accs = get_train_test_acc(model=pre_model, loaders=all_loaders, writer=tb_writer, step=num_epochs * steps,
                               logger=logger, no_save=no_save)
 
+
 def main():
     """Main method"""
     indices, preds = get_indices()
-    run_training(indices=indices, predictions=preds)
+    run_training(indices=indices, predictions=preds, logits=None)
 
 
 if __name__ == "__main__":

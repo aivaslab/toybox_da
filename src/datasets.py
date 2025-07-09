@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 import os
 
+import torch
 import torch.utils.data as torchdata
 
 IN12_MEAN = (0.4980, 0.4845, 0.4541)
@@ -145,12 +146,13 @@ class DatasetIN12FromIndices(torchdata.Dataset):
     """
     This class implements the IN12 dataset loaded from the specified indices
     """
-    def __init__(self, transform=None, hypertune=True, train_indices=None, labels=None):
+    def __init__(self, transform=None, hypertune=True, train_indices=None, labels=None, logits=None):
         self.transform = transform
         self.root = IN12_DATA_PATH
         self.hypertune = hypertune
         self.train_indices = train_indices
         self.labels = labels
+        self.logits = logits
 
         if self.hypertune:
             self.images_file = self.root + "dev.pickle"
@@ -169,7 +171,7 @@ class DatasetIN12FromIndices(torchdata.Dataset):
     def count_correct_incorrect(self):
         correct, incorrect = 0, 0
         for i, idx in enumerate(self.selected_indices):
-            if int(self.labels[i]) == int(self.gt_labels[idx]["Class ID"]):
+            if int(self.labels[idx]) == int(self.gt_labels[idx]["Class ID"]):
                 correct += 1
             else:
                 incorrect += 1
@@ -182,7 +184,10 @@ class DatasetIN12FromIndices(torchdata.Dataset):
         item = self.selected_indices[index]
         im = np.array(cv2.imdecode(self.images[item], 3))
         im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-        label = int(self.labels[index])
+        if self.logits is not None:
+            label = torch.from_numpy(np.array(self.labels[item]))
+        else:
+            label = int(self.labels[item])
         if self.transform is not None:
             im = self.transform(im)
         return (index, item), im, label
