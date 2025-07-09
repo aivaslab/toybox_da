@@ -41,14 +41,16 @@ class CSVUtil:
 
         return round(acc, 2)
 
-    def get_confusion_matrix(self, num_classes):
+    def get_confusion_matrix(self, num_classes, indices=None):
         """Calculate confusion matrix"""
         conf_matrix = np.zeros((num_classes, num_classes), dtype=float)
         cntr = collections.Counter()
         for row in self.reader_data:
             label, prediction = int(row[LABEL_KEY]), int(row[PREDICTION_KEY])
-            cntr[label] += 1.0
-            conf_matrix[label][prediction] += 1.0
+            index = int(row[INDEX_KEY])
+            if indices is None or index in indices:
+                cntr[label] += 1.0
+                conf_matrix[label][prediction] += 1.0
 
         for cl in range(num_classes):
             for cl2 in range(num_classes):
@@ -92,6 +94,31 @@ class CSVUtil:
                 pred_dict[index] = prediction
 
         return pred_dict
+
+    def get_labels(self, indices=None):
+        """Return labels for given indices"""
+        labels_dict = {}
+        for row in self.reader_data:
+            index = int(row[INDEX_KEY])
+            label = int(row[LABEL_KEY])
+            if indices is None or index in indices:
+                labels_dict[index] = label
+
+        return labels_dict
+
+    def get_logits(self, indices=None):
+        """Return logits for given indices"""
+        logits_dict = {}
+        for row in self.reader_data:
+            index = int(row[INDEX_KEY])
+            if indices is None or index in indices:
+                logits = []
+                for cl in range(len(TB_CLASSES)):
+                    logit = float(row[f"out_{cl}"])
+                    logits.append(logit)
+                logits_dict[index] = logits
+
+        return logits_dict
 
 
 if __name__ == '__main__':
