@@ -1147,6 +1147,34 @@ class DualSupModelWith2Classifiers:
         acc_1, acc_2 = n_correct_1 / n_total_1, n_correct_2 / n_total_2
         return round(acc_1, 2), round(acc_2, 2)
 
+    def get_eval_dicts(self, loader, loader_name, cl):
+        """Evaluate the model on the provided dataloader"""
+        assert cl in (1, 2)
+        start_time = time.time()
+        n_total = 0
+        n_correct = 0
+        labels_dict = {}
+        preds_dict = {}
+        self.network.set_eval()
+        for _, (idxs, images, labels) in enumerate(loader):
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                if cl == 1:
+                    _, logits = self.network.forward_1(images)
+                else:
+                    _, logits = self.network.forward_2(images)
+            top, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
+            for i in range(pred.shape[0]):
+                idx = idxs[1][i].item()
+                labels_dict[idx] = labels[i].item()
+                preds_dict[idx] = pred[i].item()
+                n_total += 1
+                n_correct += 1 if labels[i].item() == pred[i].item() else 0
+        acc = 100. * n_correct / n_total
+        self.logger.info("Accuracy -- {:s}: {:.2f}     T: {:.2f}s".format(loader_name, acc,
+                                                                          time.time() - start_time))
+        return labels_dict, preds_dict
+
 
 class DualSupModelWithDomain:
     """Module implementing the combined supervised pretraining on source and target and domain classification"""
