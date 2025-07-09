@@ -65,6 +65,7 @@ def get_parser():
                         help="Use this flag to start from pretrained network")
     parser.add_argument("--load-path", default="", type=str,
                         help="Use this option to specify the directory from which model weights should be loaded")
+    parser.add_argument("--load-fname", default="final_model.pt", type=str)
     parser.add_argument("--dropout", "-drop", default=0, type=int, choices=[0, 1, 2, 3],
                         help="Use this flag to enable dropout")
     parser.add_argument("--no-save", default=False, action='store_true', help="Use this flag to not save anything")
@@ -289,7 +290,7 @@ def main():
 
     torch.manual_seed(exp_args["seed"])
     if exp_args['load_path'] != "" and os.path.isdir(exp_args['load_path']):
-        load_file_path = exp_args['load_path'] + "final_model.pt"
+        load_file_path = exp_args['load_path'] + exp_args["load_fname"]
         load_file = torch.load(load_file_path)
         logger.info(f"Loading model weights from {load_file_path} ({load_file['type']})")
         bb_wts = load_file['backbone']
@@ -413,15 +414,15 @@ def main():
         utils.save_args(path=tb_path, args=exp_args)
         logger.info("Experimental details and results saved to {}".format(tb_path))
 
-        logger.info("-------------------------------------------------------------------------")
-        exp_args['load_path'] = tb_path + "best_tb_val_loss_model.pt"
-        logger.info("Evaluating model with best val loss on Toybox")
-        eval_model(exp_args)
-
-        logger.info("-------------------------------------------------------------------------")
-        exp_args['load_path'] = tb_path + "best_tb_val_acc_model.pt"
-        logger.info("Evaluating model with best val acc on Toybox")
-        eval_model(exp_args)
+        # logger.info("-------------------------------------------------------------------------")
+        # exp_args['load_path'] = tb_path + "best_tb_val_loss_model.pt"
+        # logger.info("Evaluating model with best val loss on Toybox")
+        # eval_model(exp_args)
+        #
+        # logger.info("-------------------------------------------------------------------------")
+        # exp_args['load_path'] = tb_path + "best_tb_val_acc_model.pt"
+        # logger.info("Evaluating model with best val acc on Toybox")
+        # eval_model(exp_args)
 
         logger.info("-------------------------------------------------------------------------")
         exp_args['load_path'] = tb_path + "final_model.pt"
